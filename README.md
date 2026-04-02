@@ -33,16 +33,16 @@ vivu-danang-bot/
 
 | id | question | answer | tags | category |
 |----|----------|--------|------|----------|
-| 1 | Shop có giao xe tận nơi không? | Dạ shop có dịch vụ giao xe tận nơi trong nội thành Đà Nẵng ạ, phí phụ thu theo khoảng cách 🚗 | giao xe,tận nơi,deliver | service |
+| 1 | Shop có giao xe tận nơi không? | Dạ shop có dịch vụ giao xe tận nơi trong nội thành Đà Nẵng ạ, phí phụ thu theo khoảng cách | giao xe,tận nơi,deliver | service |
 | 2 | Thuê xe cần giấy tờ gì? | Dạ bạn cần CMND/CCCD và bằng lái xe còn hạn ạ. Nếu thuê xe có tài thì chỉ cần CMND thôi nhé! | giấy tờ,cmnd,bằng lái,hồ sơ | policy |
-| 3 | Đặt cọc bao nhiêu? | Dạ shop thu cọc 30% giá trị thuê khi đặt lịch ạ, thanh toán phần còn lại khi nhận xe 💳 | đặt cọc,cọc,deposit | payment |
+| 3 | Đặt cọc bao nhiêu? | Dạ shop thu cọc 30% giá trị thuê khi đặt lịch ạ, thanh toán phần còn lại khi nhận xe | đặt cọc,cọc,deposit | payment |
 | 4 | Có hủy được không? | Dạ bạn có thể hủy trước 24h và được hoàn cọc 100% ạ. Hủy trong vòng 24h sẽ mất cọc nhé! | hủy,hoàn tiền,cancel,refund | policy |
-| 5 | Giá thuê xe 4 chỗ bao nhiêu? | Dạ xe 4 chỗ tự lái từ 700.000đ/ngày, có tài từ 1.200.000đ/ngày ạ 🚗 | giá,4 chỗ,xe 4,tự lái | price |
+| 5 | Giá thuê xe 4 chỗ bao nhiêu? | Dạ xe 4 chỗ tự lái từ 700.000đ/ngày, có tài từ 1.200.000đ/ngày ạ | giá,4 chỗ,xe 4,tự lái | price |
 | 6 | Giá thuê xe 7 chỗ? | Dạ xe 7 chỗ tự lái từ 900.000đ/ngày, có tài từ 1.500.000đ/ngày ạ | giá,7 chỗ,xe 7 | price |
-| 7 | Shop ở đâu? | Dạ Vi vu Đà Nẵng ở [địa chỉ shop] ạ. Bạn có thể Google Maps "[tên shop]" để tìm đường nhé 📍 | địa chỉ,ở đâu,location | contact |
-| 8 | Hotline shop? | Dạ hotline Vi vu Đà Nẵng là [số điện thoại] ạ. Hoặc nhắn Zalo cùng số này nhé! 📞 | hotline,sdt,số điện thoại,zalo | contact |
+| 7 | Shop ở đâu? | Dạ Vi vu Đà Nẵng ở [địa chỉ shop] ạ. Bạn có thể Google Maps "[tên shop]" để tìm đường nhé | địa chỉ,ở đâu,location | contact |
+| 8 | Hotline shop? | Dạ hotline Vi vu Đà Nẵng là [số điện thoại] ạ. Hoặc nhắn Zalo cùng số này nhé! | hotline,sdt,số điện thoại,zalo | contact |
 | 9 | Có thuê theo giờ không? | Dạ shop chỉ cho thuê theo ngày ạ (tính từ 8h sáng). Nếu bạn cần thuê nửa ngày thì nhắn shop tư vấn thêm nhé! | theo giờ,nửa ngày,hourly | service |
-| 10 | Xe có bảo hiểm không? | Dạ tất cả xe của shop đều có bảo hiểm dân sự đầy đủ ạ. Bạn yên tâm nhé! 🛡️ | bảo hiểm,insurance | policy |
+| 10 | Xe có bảo hiểm không? | Dạ tất cả xe của shop đều có bảo hiểm dân sự đầy đủ ạ. Bạn yên tâm nhé! | bảo hiểm,insurance | policy |
 
 ---
 
@@ -130,7 +130,7 @@ curl -X POST http://localhost:8000/webhook \
 
 ---
 
-## 📱 BƯỚC 5 — Setup ManyChat
+## BƯỚC 5 — Setup ManyChat
 
 ### Tạo Flow "Bot Reply":
 1. **Trigger**: "Customer Chat" (mọi tin nhắn)
