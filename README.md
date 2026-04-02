@@ -1,10 +1,10 @@
-# 🚗 Vi vu Đà Nẵng — Messenger Bot
+# Vi vu Đà Nẵng — Messenger Bot
 
 Bot tự động trả lời Messenger cho dịch vụ cho thuê xe, build với FastAPI + Google Sheet + ManyChat.
 
 ---
 
-## 📁 Cấu trúc project
+## Cấu trúc project
 
 ```
 vivu-danang-bot/
@@ -21,7 +21,7 @@ vivu-danang-bot/
 
 ---
 
-## 🗂️ BƯỚC 1 — Setup Google Sheet
+## BƯỚC 1 — Setup Google Sheet
 
 ### Tạo Spreadsheet mới tên: `vivu-danang-bot`
 
@@ -74,7 +74,7 @@ vivu-danang-bot/
 
 ---
 
-## 🔑 BƯỚC 2 — Tạo Google Service Account
+## BƯỚC 2 — Tạo Google Service Account
 
 1. Vào [Google Cloud Console](https://console.cloud.google.com)
 2. Tạo project mới (hoặc dùng project có sẵn)
@@ -87,7 +87,7 @@ vivu-danang-bot/
 
 ---
 
-## 💻 BƯỚC 3 — Chạy local
+## BƯỚC 3 — Chạy local
 
 ```bash
 # Clone / copy code về
@@ -117,7 +117,7 @@ curl -X POST http://localhost:8000/webhook \
 
 ---
 
-## 🚀 BƯỚC 4 — Deploy lên Render
+## BƯỚC 4 — Deploy lên Render
 
 1. Push code lên GitHub
 2. Vào [render.com](https://render.com) → **New Web Service**
@@ -154,7 +154,7 @@ curl -X POST http://localhost:8000/webhook \
 
 ---
 
-## 📊 Theo dõi hiệu quả
+## Theo dõi hiệu quả
 
 Xem tab `logs` trong Google Sheet để biết:
 - Khách hỏi gì nhiều nhất
@@ -163,7 +163,7 @@ Xem tab `logs` trong Google Sheet để biết:
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
 - [x] Phase 1: FAQ matching + Booking guide + Fallback
 - [ ] Phase 2: OpenAI rewrite answers
