@@ -1,6 +1,37 @@
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
-gspread==6.1.2
+# Core Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Database
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+alembic==1.13.0
+
+# API & Web
+requests==2.31.0
+pydantic==2.4.2
+pydantic-settings==2.0.3
+python-dotenv==1.0.0
+
+# AI & ML
+google-generativeai>=0.5.0
 google-auth==2.29.0
+
+# Text Processing
 rapidfuzz==3.9.1
-python-dotenv==1.0.1
+python-Levenshtein==0.22.0
+
+# Google Sheets Integration
+gspread==6.0.2
+
+# Utilities
+pytz==2023.3
+typing-extensions==4.8.0
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+httpx==0.25.0
+
+# Logging & Monitoring
+python-json-logger==2.0.7
