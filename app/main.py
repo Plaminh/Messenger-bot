@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 # ─── Internal imports ────────────────────────────────────────────
 from app.core.config import HOST, PORT, DEBUG, META_VERIFY_TOKEN, DATABASE_URL, APP_NAME, APP_VERSION
 from app.core.database import get_db, init_db
+from app.core.migrations import run_migrations
 from app.handlers.webhook import send_message_to_facebook
 from app.handlers.router import MessageRouter
 from app.api.router import api_router
@@ -33,13 +34,19 @@ def health_check():
 # ─── Startup Event ──────────────────────────────────────────────
 @app.on_event("startup")
 def startup_event():
-    """Initialize database on startup"""
+    """Initialize database and run migrations on startup"""
     logger.info(f"🚀 Starting {APP_NAME} v{APP_VERSION}...")
     try:
+        # Run auto-migrations
+        logger.info("🔄 Running auto-migrations...")
+        run_migrations(DATABASE_URL)
+        
+        # Initialize database (create tables if not exist)
         init_db()
         logger.info("✅ Database ready")
     except Exception as e:
         logger.error(f"❌ Database init failed: {e}", exc_info=True)
+        # Don't crash - just warn
 
 # ─── Include API Routes ──────────────────────────────────────────
 app.include_router(api_router)
