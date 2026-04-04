@@ -4,7 +4,7 @@ Meta Messenger Webhook Handler
 import logging
 import os
 import requests
-from app.core.config import META_API_VERSION
+from core.config import META_API_VERSION
 
 logger = logging.getLogger(__name__)
 

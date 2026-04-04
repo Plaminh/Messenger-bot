@@ -7,7 +7,7 @@ Google Gemini AI Integration with Round-Robin API Key Management
 import logging
 import itertools
 import google.generativeai as genai
-from app.core.config import GEMINI_API_KEYS, GEMINI_MODEL
+from core.config import GEMINI_API_KEYS, GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 

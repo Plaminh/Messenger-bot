@@ -3,10 +3,10 @@ AI Handler - Gemini Integration with Cache and Quota Management
 """
 import logging
 from sqlalchemy.orm import Session
-from app.ai.gemini import call_gemini_api
-from app.ai.prompts import SYSTEM_PROMPT_VI_VU
-from app.db import models, schemas
-from app.utils.cache import find_cached_response, save_to_cache
+from ai.gemini import call_gemini_api
+from ai.prompts import SYSTEM_PROMPT_VI_VU
+from db import models, schemas
+from utils.cache import find_cached_response, save_to_cache
 
 logger = logging.getLogger(__name__)
 

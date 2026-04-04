@@ -5,7 +5,7 @@ Handles FAQ matching, commands, and entity recognition
 import logging
 import re
 from sqlalchemy.orm import Session
-from app.db import models
+from db import models
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ Based on proposal schema (Phase 1)
 from sqlalchemy import Column, Integer, String, Text, DateTime, Date, DECIMAL, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime
-from app.db.base import Base
+from db.base import Base
 
 class FAQ(Base):
     """FAQ table for rule-based answers"""

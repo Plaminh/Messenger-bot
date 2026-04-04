@@ -3,8 +3,8 @@ Conversation Management API Endpoints
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from app.core.database import get_db
-from app.db import crud, schemas
+from core.database import get_db
+from db import crud, schemas
 from typing import List
 
 router = APIRouter()

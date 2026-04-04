@@ -6,7 +6,7 @@ See logger_sheets.py for legacy Google Sheets logging.
 """
 import logging
 from sqlalchemy.orm import Session
-from app.db import crud, schemas
+from db import crud, schemas
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ def log_conversation(
     Log conversation to PostgreSQL
     
     Usage:
-        from app.utils.logger import log_conversation
+        from utils.logger import log_conversation
         log_conversation(
             db=db_session,
             customer_id=1,

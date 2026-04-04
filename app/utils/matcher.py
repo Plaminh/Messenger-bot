@@ -1,5 +1,5 @@
 from rapidfuzz import fuzz, process
-from app.utils.sheet import get_faq_data, get_vehicles_data
+from utils.sheet import get_faq_data, get_vehicles_data
 import re
 import logging
 

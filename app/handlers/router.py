@@ -4,9 +4,9 @@ Routes messages to appropriate handler: Command -> Rule-Based -> Cache -> AI
 """
 import logging
 from sqlalchemy.orm import Session
-from app.handlers.rule_based import RuleBasedHandler
-from app.handlers.ai import AIHandler
-from app.db import models
+from handlers.rule_based import RuleBasedHandler
+from handlers.ai import AIHandler
+from db import models
 
 logger = logging.getLogger(__name__)
 

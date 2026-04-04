@@ -6,16 +6,13 @@ import sys
 from pathlib import Path
 from sqlalchemy.orm import Session
 
-# Ensure app directory is in Python path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 # Internal imports
-from app.core.config import HOST, PORT, DEBUG, META_VERIFY_TOKEN, DATABASE_URL, APP_NAME, APP_VERSION
-from app.core.database import get_db, init_db
-from app.core.migrations import run_migrations
-from app.handlers.webhook import send_message_to_facebook
-from app.handlers.router import MessageRouter
-from app.api.router import api_router
+from core.config import HOST, PORT, DEBUG, META_VERIFY_TOKEN, DATABASE_URL, APP_NAME, APP_VERSION
+from core.database import get_db, init_db
+from core.migrations import run_migrations
+from handlers.webhook import send_message_to_facebook
+from handlers.router import MessageRouter
+from api.router import api_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

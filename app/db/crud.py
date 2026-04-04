@@ -2,7 +2,7 @@
 CRUD Operations - Phase 1 - Vi Vu Danang
 """
 from sqlalchemy.orm import Session
-from app.db import models, schemas
+from db import models, schemas
 from typing import List, Optional
 from datetime import date
 import logging
