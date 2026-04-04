@@ -2,15 +2,33 @@ from fastapi import FastAPI, Request, Depends
 from fastapi.responses import JSONResponse, PlainTextResponse
 import logging
 import os
+import sys
+from pathlib import Path
 from sqlalchemy.orm import Session
 
+# ─── Add parent directory to path for imports ────────────────────
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 # ─── Internal imports ────────────────────────────────────────────
-from app.core.config import HOST, PORT, DEBUG, META_VERIFY_TOKEN, DATABASE_URL, APP_NAME, APP_VERSION
-from app.core.database import get_db, init_db
-from app.core.migrations import run_migrations
-from app.handlers.webhook import send_message_to_facebook
-from app.handlers.router import MessageRouter
-from app.api.router import api_router
+try:
+    from app.core.config import HOST, PORT, DEBUG, META_VERIFY_TOKEN, DATABASE_URL, APP_NAME, APP_VERSION
+    from app.core.database import get_db, init_db
+    from app.core.migrations import run_migrations
+    from app.handlers.webhook import send_message_to_facebook
+    from app.handlers.router import MessageRouter
+    from app.api.router import api_router
+except ImportError as e:
+    # Fallback for deployment environments
+    import sys
+    parent_dir = str(Path(__file__).parent.parent.parent)
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+    from app.core.config import HOST, PORT, DEBUG, META_VERIFY_TOKEN, DATABASE_URL, APP_NAME, APP_VERSION
+    from app.core.database import get_db, init_db
+    from app.core.migrations import run_migrations
+    from app.handlers.webhook import send_message_to_facebook
+    from app.handlers.router import MessageRouter
+    from app.api.router import api_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
