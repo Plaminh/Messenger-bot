@@ -3,8 +3,8 @@ Vehicles API Endpoints (Phase 1)
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from core.database import get_db
-from db import crud, schemas
+from app.core.database import get_db
+from app.db import crud, schemas
 from typing import List
 
 router = APIRouter()

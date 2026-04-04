@@ -3,7 +3,7 @@ PostgreSQL Database Setup
 """
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
-from core.config import DATABASE_URL, SQLALCHEMY_ECHO
+from app.core.config import DATABASE_URL, SQLALCHEMY_ECHO
 import logging
 
 logger = logging.getLogger(__name__)
@@ -44,12 +44,12 @@ def get_db() -> Session:
 
 def init_db():
     """Initialize database (create all tables)"""
-    from db.base import Base
+    from app.db.base import Base
     Base.metadata.create_all(bind=engine)
     logger.info("✅ Database tables created/verified")
 
 def drop_db():
     """Drop all tables (use with caution!)"""
-    from db.base import Base
+    from app.db.base import Base
     Base.metadata.drop_all(bind=engine)
     logger.warning("⚠️ Database tables dropped!")

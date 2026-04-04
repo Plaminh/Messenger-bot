@@ -4,10 +4,10 @@ Reduces Gemini API calls by 70-80%
 """
 import logging
 from sqlalchemy.orm import Session
-from ai.gemini import call_gemini_api
-from db import models, schemas
-from handlers.rule_based import RuleBasedHandler
-from utils.cache import cache_get, cache_set, cache_stats
+from app.ai.gemini import call_gemini_api
+from app.db import models, schemas
+from app.handlers.rule_based import RuleBasedHandler
+from app.utils.cache import cache_get, cache_set, cache_stats
 import time
 
 logger = logging.getLogger(__name__)

@@ -5,7 +5,7 @@ Multi-step booking flow
 import logging
 from datetime import date
 from sqlalchemy.orm import Session
-from db import models, schemas
+from app.db import models, schemas
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ class BookingHandler:
                 return False
             
             # Mark unavailable
-            from handlers.availability import AvailabilityChecker
+            from app.handlers.availability import AvailabilityChecker
             AvailabilityChecker.mark_unavailable(
                 booking.vehicle_id,
                 booking.start_date,

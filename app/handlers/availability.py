@@ -4,7 +4,7 @@ Vehicle Availability Checker
 import logging
 from datetime import date, datetime, timedelta
 from sqlalchemy.orm import Session
-from db import models
+from app.db import models
 
 logger = logging.getLogger(__name__)
 

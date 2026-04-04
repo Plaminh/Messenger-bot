@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from difflib import SequenceMatcher
 from sqlalchemy.orm import Session
-from db import models
+from app.db import models
 
 logger = logging.getLogger(__name__)
 

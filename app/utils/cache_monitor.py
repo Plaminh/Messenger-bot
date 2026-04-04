@@ -5,8 +5,8 @@ Provides utilities for monitoring cache performance and maintaining database hea
 import logging
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from db import models
-from utils.cache import get_cache_stats, clear_old_cache
+from app.db import models
+from app.utils.cache import get_cache_stats, clear_old_cache
 
 logger = logging.getLogger(__name__)
 
