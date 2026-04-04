@@ -7,7 +7,6 @@ from app.ai.gemini import call_gemini_api
 from app.ai.prompts import SYSTEM_PROMPT_VI_VU
 from app.db import models, schemas
 from app.utils.cache import find_cached_response, save_to_cache
-from app.utils.logger import log_to_sheets
 
 logger = logging.getLogger(__name__)
 
