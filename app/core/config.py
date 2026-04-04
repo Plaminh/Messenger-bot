@@ -37,7 +37,7 @@ for i in range(1, 10):
     if key:
         GEMINI_API_KEYS.append(key)
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")  # Unlimited RPD, 30 RPM per key
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")  # Unlimited daily, 30 RPM per key
 
 # ─── Google Cloud (for Vertex AI) ────────────────────────────────
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")  # Your GCP project ID

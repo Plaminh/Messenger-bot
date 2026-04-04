@@ -55,15 +55,16 @@ class GeminiRoundRobin:
         self.call_count += 1
         return key
     
-    def get_model(self) -> genai.GenerativeModel:
+    def get_model(self) -> tuple[genai.GenerativeModel, str]:
         """
         Get configured Gemini model with next key in rotation
         
         Returns:
-            Configured GenerativeModel instance
+            Tuple of (GenerativeModel instance, API key used)
         """
         try:
             api_key = self.get_next_key()
+            # Configure the API key BEFORE creating the model
             genai.configure(api_key=api_key)
             
             model = genai.GenerativeModel(
@@ -87,7 +88,7 @@ Hướng dẫn:
             )
             
             logger.debug(f"Model loaded (key: {api_key[:10]}...)")
-            return model
+            return model, api_key
         except Exception as e:
             logger.error(f"❌ Failed to get model: {e}")
             raise
@@ -110,8 +111,8 @@ Hướng dẫn:
             AI response text
         """
         try:
-            # Get next model in rotation
-            model = self.get_model()
+            # Get next model in rotation (returns tuple: model, api_key)
+            model, api_key = self.get_model()
             
             # Build system prompt
             system_prompt = context or ""
@@ -131,6 +132,9 @@ Hướng dẫn:
                 "parts": [user_message]
             })
             
+            # ✅ Re-configure API key RIGHT BEFORE the API call to ensure correct key is used
+            genai.configure(api_key=api_key)
+            
             # Generate response
             response = model.generate_content(
                 messages,
@@ -141,14 +145,14 @@ Hướng dẫn:
             )
             
             if response and response.text:
-                logger.info(f"✅ Response generated (call #{self.call_count})")
+                logger.info(f"✅ Response generated (call #{self.call_count}, key: {api_key[:10]}...)")
                 return response.text.strip()
             else:
                 logger.warning("Empty response from Gemini")
                 return "Xin lỗi, tôi không thể tạo response. Vui lòng thử lại."
         
         except Exception as e:
-            logger.error(f"❌ Error in generate_response: {e}")
+            logger.error(f"❌ Error in generate_response: {e}", exc_info=True)
             # Fallback message
             return "🚗 Hệ thống đang bận. Vui lòng thử lại sau hoặc gõ /help"
 

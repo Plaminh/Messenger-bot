@@ -55,7 +55,7 @@ services:
       GEMINI_API_KEY_7: ${GEMINI_API_KEY_7:-}
       GEMINI_API_KEY_8: ${GEMINI_API_KEY_8:-}
       GEMINI_API_KEY_9: ${GEMINI_API_KEY_9:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       
       # App Settings
       DEBUG: ${DEBUG:-True}
