@@ -4,10 +4,25 @@ Automatically run SQL migrations on app startup
 """
 import logging
 import os
+import re
 from pathlib import Path
 from sqlalchemy import text, create_engine
 
 logger = logging.getLogger(__name__)
+
+def strip_sql_comments(sql: str) -> str:
+    """
+    Remove SQL comments from a statement
+    Handles both -- line comments and /* */ block comments
+    """
+    # Remove -- comments (line comments)
+    lines = [line.split('--')[0] for line in sql.split('\n')]
+    sql = '\n'.join(lines)
+    
+    # Remove /* */ comments (block comments)
+    sql = re.sub(r'/\*.*?\*/', '', sql, flags=re.DOTALL)
+    
+    return sql.strip()
 
 def run_migrations(database_url: str):
     """
@@ -47,10 +62,15 @@ def run_migrations(database_url: str):
                     logger.info(f"🔄 Running migration: {sql_file.name}")
                     
                     # Execute SQL (split by semicolon for multiple statements)
-                    statements = [stmt.strip() for stmt in sql_content.split(';') if stmt.strip()]
+                    statements = [stmt.strip() for stmt in sql_content.split(';')]
                     
                     for statement in statements:
-                        connection.execute(text(statement))
+                        # Strip comments from statement
+                        cleaned = strip_sql_comments(statement)
+                        
+                        # Only execute non-empty statements
+                        if cleaned:
+                            connection.execute(text(cleaned))
                     
                     connection.commit()
                     logger.info(f"✅ Migration completed: {sql_file.name}")
