@@ -25,14 +25,18 @@ class GeminiRoundRobin:
     
     def __init__(self):
         """Initialize Round-robin with API keys from config"""
+        logger.info(f"Initializing GeminiRoundRobin... Found {len(GEMINI_API_KEYS)} keys from config")
+        
         if not GEMINI_API_KEYS:
-            raise ValueError(
+            error_msg = (
                 "❌ No API keys found! Set GEMINI_API_KEY_1 through GEMINI_API_KEY_9 in .env\n"
                 "Example:\n"
                 "  GEMINI_API_KEY_1=AIzaSyA...\n"
                 "  GEMINI_API_KEY_2=AIzaSyB...\n"
                 "  ... (up to GEMINI_API_KEY_9)"
             )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         
         self.available_keys = GEMINI_API_KEYS.copy()
         self.key_cycle = itertools.cycle(self.available_keys)
@@ -174,7 +178,7 @@ async def call_gemini_api(
         rr = get_gemini_roundrobin()
         return await rr.generate_response(user_message, chat_history, context)
     except Exception as e:
-        logger.error(f"❌ Gemini API error: {e}")
+        logger.error(f"❌ Gemini API error: {e}", exc_info=True)
         return "Xin lỗi, gặp lỗi khi xử lý. Vui lòng thử lại sau."
 
 

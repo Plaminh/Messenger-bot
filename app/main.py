@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 # Load environment variables from .env file FIRST
 from dotenv import load_dotenv
-load_dotenv()
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(env_path)
 
 # Ensure app directory is in Python path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))

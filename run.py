@@ -9,7 +9,8 @@ from pathlib import Path
 
 # Load environment variables from .env file FIRST
 from dotenv import load_dotenv
-load_dotenv()
+env_path = Path(__file__).parent / ".env"
+load_dotenv(env_path)
 
 # Get the app directory (parent of parent of this script's parent)
 # Script should be at /app/run.py
