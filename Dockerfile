@@ -24,12 +24,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the entire project
 COPY . .
 
-# Copy and make startup script executable
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
-
 # Expose the API port
 EXPOSE 8000
 
-# Use shell form CMD to properly evaluate PYTHONPATH
-CMD /bin/bash -c 'export PYTHONPATH=/app:$PYTHONPATH && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000'
+# Use Python script for startup (handles path setup)
+CMD ["python", "/app/run.py"]
