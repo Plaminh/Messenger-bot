@@ -6,6 +6,10 @@ import sys
 from pathlib import Path
 from sqlalchemy.orm import Session
 
+# Load environment variables from .env file FIRST
+from dotenv import load_dotenv
+load_dotenv()
+
 # Ensure app directory is in Python path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 

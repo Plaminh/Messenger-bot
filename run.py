@@ -7,6 +7,10 @@ import sys
 import os
 from pathlib import Path
 
+# Load environment variables from .env file FIRST
+from dotenv import load_dotenv
+load_dotenv()
+
 # Get the app directory (parent of parent of this script's parent)
 # Script should be at /app/run.py
 # So /app is at Path(__file__).parent
