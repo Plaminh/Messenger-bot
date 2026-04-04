@@ -99,3 +99,19 @@ class MessageLog(Base):
     message_type = Column(String(20), nullable=True)  # 'text', 'quick_reply', 'button', 'image'
     meta_data = Column(JSON, nullable=True)  # Extra info (button clicked, image URL, etc)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class AIResponseCache(Base):
+    """
+    Cache for AI responses to reduce API quota usage.
+    Uses query hash for fast lookup when similar questions are asked.
+    """
+    __tablename__ = "ai_response_cache"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_query_hash = Column(String(64), unique=True, nullable=False, index=True)
+    user_query = Column(Text, nullable=False)  # Store original query for debugging
+    ai_answer = Column(Text, nullable=False)
+    use_count = Column(Integer, default=1)  # Track reuse frequency for analytics
+    similarity_threshold = Column(Integer, default=90)  # Minimum similarity % to use cache
+    last_used_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)

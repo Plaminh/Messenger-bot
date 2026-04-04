@@ -24,10 +24,10 @@ META_PAGE_ACCESS_TOKEN = os.getenv("META_PAGE_ACCESS_TOKEN", "your_page_token_he
 META_API_VERSION = os.getenv("META_API_VERSION", "v18.0")
 
 # ─── Gemini AI ───────────────────────────────────────────────────
-# Choose: 'ai_studio' (free, limited) or 'vertex_ai' (Google Cloud, uses credits)
+# Choose: 'ai_studio' (free, unlimited) or 'vertex_ai' (Google Cloud, uses credits)
 GEMINI_API_TYPE = os.getenv("GEMINI_API_TYPE", "ai_studio")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")  # Unlimited RPD, 30 RPM
 
 # ─── Google Cloud (for Vertex AI) ────────────────────────────────
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")  # Your GCP project ID

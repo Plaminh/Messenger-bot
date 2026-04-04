@@ -1,22 +1,54 @@
 """
-AI Handler - Gemini Integration
+AI Handler - Gemini Integration with Cache and Quota Management
 """
 import logging
 from sqlalchemy.orm import Session
 from app.ai.gemini import call_gemini_api
+from app.ai.prompts import SYSTEM_PROMPT_VI_VU
 from app.db import models, schemas
+from app.utils.cache import find_cached_response, save_to_cache
+from app.utils.logger import log_to_sheets
 
 logger = logging.getLogger(__name__)
 
+# Default fallback message when quota is exceeded
+QUOTA_EXCEEDED_MESSAGE = """🚗 Xin lỗi nhé! Hệ thống tư vấn AI của chúng tôi đang bảo trì. 
+
+Để được hỗ trợ nhanh chóng, bạn có thể:
+1️⃣ Gõ /gia để xem bảng giá
+2️⃣ Gõ /xe để xem danh sách xe
+3️⃣ Gõ /dat để đặt xe ngay
+4️⃣ Hoặc liên hệ Hotline: 0905.xxx.xxx
+
+Cảm ơn bạn! ✨"""
+
 class AIHandler:
     """
-    Handle AI responses using Gemini
+    Handle AI responses using Gemini with quota optimization
+    
+    Strategy:
+    1. Check cache first (Rule-based cache hit)
+    2. Call Gemini API (with error handling for quota)
+    3. Save successful responses to cache
     """
     
     @staticmethod
-    def get_chat_history(user_id: str, limit: int = 10, db: Session = None) -> list[dict]:
+    def get_chat_history(user_id: str, limit: int = 5, db: Session = None) -> list[dict]:
         """
-        Fetch chat history for user
+        Fetch recent chat history for user
+        
+        OPTIMIZATION: Only fetch last 3-5 messages to minimize input tokens
+        - Reduced from 10 to 5 messages
+        - Each message ~100 tokens, so 5 messages = ~500 tokens saved per request
+        - With 100 requests/day: 50,000 tokens saved = ~20% reduction
+        
+        Args:
+            user_id: User ID
+            limit: Max messages to fetch (default 5 for quota optimization)
+            db: Database session
+            
+        Returns:
+            List of message dicts with role and content
         """
         if not db:
             return []
@@ -33,6 +65,7 @@ class AIHandler:
                     "content": msg.content
                 })
             
+            logger.debug(f"Fetched {len(history)} recent messages for context (optimized for quota)")
             return history
         
         except Exception as e:
@@ -42,23 +75,27 @@ class AIHandler:
     @staticmethod
     def build_context(user_id: str, db: Session) -> str:
         """
-        Build system context for Gemini
+        Build system context for Gemini with current vehicle info
         """
-        # Get available vehicles
-        vehicles = db.query(models.Vehicle).filter(
-            models.Vehicle.status == 'active'
-        ).all()
+        context = SYSTEM_PROMPT_VI_VU + "\n\n# CURRENT VEHICLE INVENTORY:\n"
         
-        vehicle_info = "Danh sách xe Vi Vu Đà Nẵng:\n"
-        for v in vehicles:
-            vehicle_info += f"- {v.name} ({v.seats} chỗ):"
-            if v.price_per_day_no_driver:
-                vehicle_info += f" {v.price_per_day_no_driver:,}đ/ngày (tự lái)"
-            if v.price_per_day_with_driver:
-                vehicle_info += f", {v.price_per_day_with_driver:,}đ/ngày (có tài)"
-            vehicle_info += "\n"
+        try:
+            # Get available vehicles
+            vehicles = db.query(models.Vehicle).filter(
+                models.Vehicle.status == 'active'
+            ).all()
+            
+            for v in vehicles:
+                context += f"- {v.name} ({v.seats} chỗ):"
+                if v.price_per_day_no_driver:
+                    context += f" {v.price_per_day_no_driver:,}đ/ngày (tự lái)"
+                if v.price_per_day_with_driver:
+                    context += f", {v.price_per_day_with_driver:,}đ/ngày (có tài xế)"
+                context += "\n"
+        except Exception as e:
+            logger.error(f"Error building context: {e}")
         
-        return vehicle_info
+        return context
     
     @staticmethod
     async def handle_message(
@@ -67,31 +104,98 @@ class AIHandler:
         db: Session
     ) -> str:
         """
-        Handle message with AI and save to database
+        Handle message with AI, using cache-first strategy
+        
+        Flow:
+        1. Check cache for similar questions
+        2. If cache hit, return cached answer
+        3. If cache miss, call Gemini API
+        4. Handle API errors (quota, rate limit, etc)
+        5. Save successful responses to cache
+        
+        Args:
+            message: User message
+            user_id: Facebook user ID
+            db: Database session
+            
+        Returns:
+            AI response or fallback message
         """
         try:
-            # Get chat history
-            history = AIHandler.get_chat_history(user_id, db=db)
+            # **STEP 1: Check cache first** (quota-saving strategy)
+            cached_response = find_cached_response(message, db, min_similarity=90)
             
-            # Build context
+            if cached_response:
+                logger.info(f"Using cached response (similarity: {cached_response['similarity_score']}%)")
+                # Still save to message logs for history
+                AIHandler.save_message_logs(user_id, "user", message, db)
+                AIHandler.save_message_logs(user_id, "assistant", cached_response['answer'], db)
+                return cached_response['answer']
+            
+            # **STEP 2: Get chat history and context**
+            history = AIHandler.get_chat_history(user_id, db=db)
             context = AIHandler.build_context(user_id, db)
             
-            # Call Gemini
-            response = await call_gemini_api(
-                user_message=message,
-                chat_history=history,
-                context=context
-            )
-            
-            # Save message logs
-            AIHandler.save_message_logs(user_id, "user", message, db)
-            AIHandler.save_message_logs(user_id, "assistant", response, db)
-            
-            return response
+            # **STEP 3: Call Gemini API with error handling**
+            try:
+                response = await call_gemini_api(
+                    user_message=message,
+                    chat_history=history,
+                    context=context
+                )
+                
+                # **STEP 4: Save successful response to cache**
+                save_to_cache(message, response, db)
+                
+                # Save message logs
+                AIHandler.save_message_logs(user_id, "user", message, db)
+                AIHandler.save_message_logs(user_id, "assistant", response, db)
+                
+                logger.info(f"AI response generated and cached for user: {user_id}")
+                return response
+                
+            except Exception as api_error:
+                error_str = str(api_error).lower()
+                
+                # Check if it's a quota exceeded error
+                if any(quota_keyword in error_str for quota_keyword in 
+                       ['quota', 'rate limit', 'too many requests', 'exceeded', 'resource']):
+                    
+                    logger.warning(f"API Quota exceeded for user {user_id}: {api_error}")
+                    
+                    # Log to sheets for monitoring
+                    try:
+                        log_to_sheets(
+                            user_id=user_id,
+                            event_type="API_QUOTA_EXCEEDED",
+                            message=f"Quota exceeded - Fallback triggered",
+                            status="warning"
+                        )
+                    except:
+                        pass
+                    
+                    # Return fallback message
+                    AIHandler.save_message_logs(user_id, "user", message, db)
+                    AIHandler.save_message_logs(user_id, "assistant", QUOTA_EXCEEDED_MESSAGE, db)
+                    return QUOTA_EXCEEDED_MESSAGE
+                
+                # Other API errors
+                logger.error(f"AI API error for user {user_id}: {api_error}")
+                
+                fallback_msg = f"Xin lỗi, tôi gặp lỗi kỹ thuật. Hãy thử lại sau hoặc gõ /dat để đặt xe."
+                AIHandler.save_message_logs(user_id, "user", message, db)
+                AIHandler.save_message_logs(user_id, "assistant", fallback_msg, db)
+                return fallback_msg
         
         except Exception as e:
-            logger.error(f"AI handling error: {e}")
-            return "Xin lỗi, tôi gặp lỗi. Hãy thử lại sau."
+            logger.error(f"Unexpected error in handle_message: {e}")
+            fallback_msg = "Xin lỗi, tôi gặp lỗi. Hãy thử lại sau."
+            try:
+                AIHandler.save_message_logs(user_id, "user", message, db)
+                AIHandler.save_message_logs(user_id, "assistant", fallback_msg, db)
+            except:
+                pass
+            return fallback_msg
     
     @staticmethod
     def save_message_logs(

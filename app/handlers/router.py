@@ -1,6 +1,6 @@
 """
 Message Router
-Routes messages to appropriate handler (Rule-Based or AI)
+Routes messages to appropriate handler: Command -> Rule-Based -> Cache -> AI
 """
 import logging
 from sqlalchemy.orm import Session
@@ -13,6 +13,12 @@ logger = logging.getLogger(__name__)
 class MessageRouter:
     """
     Route incoming messages to appropriate handler
+    
+    Priority (Quota Optimization Strategy):
+    1. Command: /gia, /dat, /check, /xe (Rule-based - no API cost)
+    2. FAQ: Pattern matching against FAQ database (Rule-based - no API cost)
+    3. Cache: Check for similar cached AI responses (Minimal cost - DB only)
+    4. AI: Call Gemini API as last resort (Full API cost)
     """
     
     @staticmethod
@@ -22,30 +28,31 @@ class MessageRouter:
         db: Session
     ) -> str:
         """
-        Route message to rule-based or AI handler
+        Route message through optimization pipeline
         
-        Priority:
-        1. Check if it's a command (/...)
-        2. Try rule-based (FAQ) matching
-        3. Fallback to AI
+        Returns the appropriate response with quota savings as first priority.
         """
         
-        # 1. Check for command
+        logger.info(f"Routing message from user {user_id}: '{message[:50]}...'")
+        
+        # **PRIORITY 1: Check for command** (Command handler - no API cost)
         command = RuleBasedHandler.is_command(message)
         if command:
             args = message.split(" ", 1)[1] if " " in message else ""
             result = RuleBasedHandler.handle_command(command, args, db)
             if result:
+                logger.info(f"Command '{command}' handled for user {user_id}")
                 return result
         
-        # 2. Try FAQ matching
+        # **PRIORITY 2: Try FAQ matching** (Rule-based - no API cost)
         faq_match = RuleBasedHandler.match_faq(message, db)
         if faq_match:
-            logger.info(f"FAQ match for user {user_id}: {faq_match.category}")
+            logger.info(f"FAQ match found (category: {faq_match.category}) for user {user_id}")
             return faq_match.answer
         
-        # 3. Fallback to AI
-        logger.info(f"Routing to AI for user {user_id}")
+        # **PRIORITY 3 & 4: Cache or AI** (handled by AIHandler)
+        # AIHandler.handle_message will check cache first, then call API if needed
+        logger.info(f"Routing to AI handler (with cache check) for user {user_id}")
         response = await AIHandler.handle_message(message, user_id, db)
         return response
     
