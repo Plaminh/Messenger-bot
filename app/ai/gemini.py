@@ -121,14 +121,19 @@ Hướng dẫn:
             messages = []
             if chat_history:
                 for msg in chat_history:
+                    # Map role to Gemini API format: "user" -> "USER", "assistant" -> "MODEL"
+                    role = msg["role"].upper()
+                    if role == "ASSISTANT":
+                        role = "MODEL"
+                    
                     messages.append({
-                        "role": msg["role"],
+                        "role": role,
                         "parts": [msg["content"]]
                     })
             
             # Add current user message
             messages.append({
-                "role": "user",
+                "role": "USER",
                 "parts": [user_message]
             })
             
