@@ -25,6 +25,16 @@ class MessageDebouncer:
         self._buffers: dict[str, list[tuple[str, Optional[str]]]] = {}
         self._timers: dict[str, asyncio.Task] = {}
         self._user_locks: dict[str, asyncio.Lock] = {}
+        # Number of turns that hold or are waiting for the user's lock
+        self._pending: dict[str, int] = {}
+
+    def _can_cleanup(self, psid: str) -> bool:
+        """True when nothing is buffered, timed or waiting for this user's lock."""
+        return (
+            psid not in self._buffers
+            and psid not in self._timers
+            and self._pending.get(psid, 0) == 0
+        )
 
     def _get_lock(self, psid: str) -> asyncio.Lock:
         """Get or create per-user asyncio.Lock."""
@@ -71,7 +81,7 @@ class MessageDebouncer:
         self._timers.pop(psid, None)
 
         if not items:
-            if psid not in self._buffers and psid not in self._timers:
+            if self._can_cleanup(psid):
                 self._user_locks.pop(psid, None)
             return
 
@@ -81,20 +91,29 @@ class MessageDebouncer:
 
         combined_text = "\n".join(texts)
         lock = self._get_lock(psid)
+        # Register as pending BEFORE awaiting the lock (no await in between), so the lock
+        # is not discarded while another turn of this user is still waiting for it.
+        self._pending[psid] = self._pending.get(psid, 0) + 1
 
-        # Process sequentially for this user
-        async with lock:
-            try:
-                sig = inspect.signature(callback)
-                if "mid" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-                    await callback(psid, combined_text, mid=last_mid)
-                elif len(sig.parameters) >= 3:
-                    await callback(psid, combined_text, last_mid)
-                else:
-                    await callback(psid, combined_text)
-            except Exception as exc:
-                logger.error("Error executing callback for psid %s: %s", psid, exc, exc_info=True)
-            finally:
-                # Cleanup per-user lock if no new messages queued or timers running
-                if psid not in self._buffers and psid not in self._timers:
-                    self._user_locks.pop(psid, None)
+        try:
+            # Process sequentially for this user
+            async with lock:
+                try:
+                    sig = inspect.signature(callback)
+                    if "mid" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                        await callback(psid, combined_text, mid=last_mid)
+                    elif len(sig.parameters) >= 3:
+                        await callback(psid, combined_text, last_mid)
+                    else:
+                        await callback(psid, combined_text)
+                except Exception as exc:
+                    logger.error("Error executing callback for psid %s: %s", psid, exc, exc_info=True)
+        finally:
+            remaining = self._pending.get(psid, 1) - 1
+            if remaining > 0:
+                self._pending[psid] = remaining
+            else:
+                self._pending.pop(psid, None)
+            # Cleanup per-user lock only if nothing else is queued, timed or waiting
+            if self._can_cleanup(psid):
+                self._user_locks.pop(psid, None)

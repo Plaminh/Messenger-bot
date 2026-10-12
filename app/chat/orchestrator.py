@@ -41,12 +41,18 @@ from app.integrations.messenger.client import MessengerClient, get_messenger_cli
 from app.memory.extractor import extract_and_sync_memories, should_trigger_extraction
 from app.memory.retriever import retrieve_relevant_memories
 from app.memory.summarizer import maybe_run_rolling_summary
-from app.memory.window import build_recent_window
+from app.memory.window import (
+    RECENT_WINDOW_MESSAGE_LIMIT,
+    RECENT_WINDOW_TOKEN_BUDGET,
+    build_recent_window,
+)
 from app.persona.prompt import assemble_system_prompt, build_chat_messages
 from app.persona.safety import is_crisis
 from app.persona.style import detect_pronouns, update_style_profile
 
 logger = get_logger(__name__)
+
+ERROR_REPLY_TEXT = "ui mình gặp trục trặc xíu, bạn nhắn lại giúp mình sau nha 🥺"
 
 
 @dataclass
@@ -81,6 +87,14 @@ class ChatOrchestrator:
         self._embedder = embedder or get_embedder()
         self._inactivity_delay = inactivity_delay
         self._inactivity_timers: dict[str, asyncio.Task] = {}
+        self._extraction_locks: dict[int, asyncio.Lock] = {}
+
+    async def _extract_memories(self, user_id: int) -> None:
+        """Run memory extraction with a fresh session, never concurrently for one user."""
+        lock = self._extraction_locks.setdefault(user_id, asyncio.Lock())
+        async with lock:
+            async with self._session_factory() as session:
+                await extract_and_sync_memories(session, user_id, self._llm, self._embedder)
 
     def _schedule_inactivity_timer(self, psid: str, user_id: int) -> None:
         """Reset and schedule per-user inactivity timer for memory extraction."""
@@ -96,8 +110,7 @@ class ChatOrchestrator:
 
             self._inactivity_timers.pop(user_psid, None)
             try:
-                async with self._session_factory() as session:
-                    await extract_and_sync_memories(session, uid, self._llm, self._embedder)
+                await self._extract_memories(uid)
             except Exception as exc:
                 logger.error("Error executing inactivity extraction for user_id=%d: %s", uid, exc)
 
@@ -114,13 +127,13 @@ class ChatOrchestrator:
     ) -> None:
         """Execute rolling summarizer and memory extractor in background."""
         try:
+            # 1. Rolling summarizer check
             async with self._session_factory() as session:
-                # 1. Rolling summarizer check
                 await maybe_run_rolling_summary(session, user_id, self._llm)
 
-                # 2. Long-term memory extraction check
-                if should_trigger_extraction(user_msg_count, last_user_msg_at):
-                    await extract_and_sync_memories(session, user_id, self._llm, self._embedder)
+            # 2. Long-term memory extraction check (per-user lock + watermark => no duplicates)
+            if should_trigger_extraction(user_msg_count, last_user_msg_at):
+                await self._extract_memories(user_id)
         except Exception as exc:
             logger.error("Error executing background tasks for user_id=%d: %s", user_id, exc)
 
@@ -183,8 +196,12 @@ class ChatOrchestrator:
             summary_record = await get_summary(read_session, user_id)
             summary_text = summary_record.content if summary_record else None
 
-            recent_history = await get_recent_messages(read_session, user_id, limit=30)
-            window_messages = build_recent_window(recent_history, token_budget=850)
+            recent_history = await get_recent_messages(
+                read_session,
+                user_id,
+                limit=RECENT_WINDOW_MESSAGE_LIMIT,
+            )
+            window_messages = build_recent_window(recent_history, token_budget=RECENT_WINDOW_TOKEN_BUDGET)
             user_msg_count = await get_user_message_count(read_session, user_id)
 
             # Step 9: Determine model tier via daily token budget
@@ -262,7 +279,9 @@ class ChatOrchestrator:
 
                 # Persist messages & profile updates in a single atomic transaction
                 await add_message(write_session, ctx.user_id, "user", ctx.clean_text, mid=ctx.mid)
-                await add_message(write_session, ctx.user_id, "assistant", reply.content)
+                # The friendly "I'm laggy" text is an error notice, not part of the conversation
+                if reply.tier != "fallback":
+                    await add_message(write_session, ctx.user_id, "assistant", reply.content)
                 await update_user_profiles(
                     write_session,
                     ctx.user_id,
@@ -298,20 +317,38 @@ class ChatOrchestrator:
         self._schedule_inactivity_timer(ctx.psid, ctx.user_id)
 
     async def handle_turn(self, psid: str, text: str, mid: Optional[str] = None) -> None:
-        """Process one conversational turn for user."""
-        ctx = await self.prepare_context(psid, text, mid)
-        if ctx is None:
-            return
+        """Process one conversational turn for user.
 
-        reply = await self.generate_reply(ctx)
+        Any failure before the reply is delivered results in a short apology message
+        instead of silence.
+        """
+        delivered = False
+        try:
+            ctx = await self.prepare_context(psid, text, mid)
+            if ctx is None:
+                return
 
-        now = datetime.now(timezone.utc)
-        persisted = await self.persist_turn(ctx, reply, now)
-        if not persisted:
-            return
+            reply = await self.generate_reply(ctx)
 
-        # Deliver response through Messenger client (mark_seen, typing, bubble delay)
-        await self._messenger.send_human_like_response(ctx.psid, reply.content)
+            now = datetime.now(timezone.utc)
+            persisted = await self.persist_turn(ctx, reply, now)
+            if not persisted:
+                return
 
-        # Schedule background tasks asynchronously with strong reference tracking
-        self.schedule_background(ctx, now)
+            # Deliver response through Messenger client (mark_seen, typing, bubble delay)
+            await self._messenger.send_human_like_response(ctx.psid, reply.content)
+            delivered = True
+
+            # Schedule background tasks asynchronously with strong reference tracking
+            self.schedule_background(ctx, now)
+        except Exception as exc:
+            logger.error("Turn failed for psid=%s: %s", psid, exc, exc_info=True)
+            if not delivered:
+                await self._send_error_reply(psid)
+
+    async def _send_error_reply(self, psid: str) -> None:
+        """Best-effort apology when the pipeline failed; never raises."""
+        try:
+            await self._messenger.send_human_like_response(psid, ERROR_REPLY_TEXT)
+        except Exception as exc:
+            logger.error("Could not deliver error reply to psid=%s: %s", psid, exc)
