@@ -1,7 +1,8 @@
 """Rolling conversation summarizer.
 
-Compresses older conversational turns into a concise running summary (<= 300 tokens)
-when unsummarized message count exceeds 30. Always runs in background using tier 'fast'.
+Compresses conversational turns that are about to leave the recent-message window into a
+concise running summary (<= 300 tokens), so there is no blind spot between the window and
+the summary. Always runs in background using tier 'fast'.
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,11 +11,18 @@ from app.core.logging import get_logger
 from app.db.store import get_summary, get_unsummarized_messages, upsert_summary
 from app.integrations.llm.base import LLMProvider
 from app.integrations.llm.budget import record_llm_usage
-from app.memory.window import estimate_tokens
+from app.memory.window import (
+    RECENT_WINDOW_MESSAGE_LIMIT,
+    RECENT_WINDOW_TOKEN_BUDGET,
+    SUMMARY_LEAD_MESSAGES,
+    SUMMARY_LEAD_TOKENS,
+    build_recent_window,
+    estimate_tokens,
+)
 
 logger = get_logger(__name__)
 
-UNSUMMARIZED_THRESHOLD = 30
+MIN_CHUNK_TO_SUMMARIZE = 4
 CHUNK_TO_SUMMARIZE = 20
 MAX_SUMMARY_TOKENS = 300
 
@@ -32,11 +40,20 @@ async def maybe_run_rolling_summary(
     upto_id = summary.upto_message_id if summary else None
 
     unsummarized = await get_unsummarized_messages(session, user_id, upto_message_id=upto_id)
-    if len(unsummarized) < UNSUMMARIZED_THRESHOLD:
+
+    # Messages the prompt window still shows verbatim (slightly smaller than the real
+    # window so the summary is always ready before a message drops out of it).
+    window_candidates = unsummarized[-max(RECENT_WINDOW_MESSAGE_LIMIT - SUMMARY_LEAD_MESSAGES, 1):]
+    visible = build_recent_window(
+        window_candidates,
+        token_budget=max(RECENT_WINDOW_TOKEN_BUDGET - SUMMARY_LEAD_TOKENS, 1),
+    )
+    outside_count = len(unsummarized) - len(visible)
+    if outside_count < MIN_CHUNK_TO_SUMMARIZE:
         return False
 
-    # Take the oldest chunk, leaving recent messages for context
-    chunk = unsummarized[:CHUNK_TO_SUMMARIZE]
+    # Summarize the oldest messages that are no longer (or almost no longer) in the window
+    chunk = unsummarized[: min(outside_count, CHUNK_TO_SUMMARIZE)]
     new_upto_id = chunk[-1].id
 
     # Format transcript
@@ -79,6 +96,12 @@ async def maybe_run_rolling_summary(
             await record_llm_usage(session, res.model, res.usage_tokens)
         updated_content = res.content.strip()
 
+        # Never overwrite the stored summary with the friendly error text / empty output
+        if res.tier == "fallback" or not updated_content:
+            await session.commit()  # keep usage accounting, leave summary untouched
+            logger.warning("Skipped rolling summary for user_id=%d: LLM unavailable or empty", user_id)
+            return False
+
         # Condense if too long
         if estimate_tokens(updated_content) > MAX_SUMMARY_TOKENS:
             condense_messages = [
@@ -96,7 +119,12 @@ async def maybe_run_rolling_summary(
             )
             if condensed_res.usage_tokens > 0:
                 await record_llm_usage(session, condensed_res.model, condensed_res.usage_tokens)
-            updated_content = condensed_res.content.strip()
+            condensed_content = condensed_res.content.strip()
+            if condensed_res.tier == "fallback" or not condensed_content:
+                await session.commit()
+                logger.warning("Skipped rolling summary for user_id=%d: condensing failed", user_id)
+                return False
+            updated_content = condensed_content
 
         await upsert_summary(session, user_id, updated_content, upto_message_id=new_upto_id)
         await session.commit()

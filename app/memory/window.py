@@ -4,6 +4,14 @@ from typing import Sequence
 from app.db.models import Message
 
 
+# Shared by the orchestrator (prompt window) and the summarizer (what must be summarized)
+RECENT_WINDOW_TOKEN_BUDGET = 850
+RECENT_WINDOW_MESSAGE_LIMIT = 30
+# Summarizer works "ahead" of the real window so no message falls between window and summary
+SUMMARY_LEAD_TOKENS = 200
+SUMMARY_LEAD_MESSAGES = 6
+
+
 def estimate_tokens(text: str) -> int:
     """Estimate token count for Vietnamese and multilingual text.
 
