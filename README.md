@@ -42,10 +42,10 @@ User gửi tin ──► Meta Webhook ──► GET /webhook: verify challenge (
 ```
 
 ### Hệ thống Trí nhớ 3 tầng (3-Tier Memory)
-1. **Trí nhớ ngắn hạn (Short-term Window)**: Cắt các lượt hội thoại gần nhất nguyên văn dựa trên ngân sách token (~850 token) thay vì số lượng tin cố định. Luôn kết thúc ở tin mới nhất.
-2. **Tóm tắt cuốn chiếu (Rolling Summary)**: Khi số tin nhắn chưa tóm tắt vượt quá 30, kích hoạt tác vụ nền gọi model `fast` để cô đọng hội thoại thành đoạn tóm tắt dòng chảy (< 300 token) lưu vào bảng `summaries`.
+1. **Trí nhớ ngắn hạn (Short-term Window)**: Cắt các lượt hội thoại gần nhất nguyên văn dựa trên ngân sách token (~850 token) thay vì số lượng tin cố định. Luôn kết thúc ở tin mới nhất. DB session được giải phóng hoàn toàn trong thời gian gọi LLM.
+2. **Tóm tắt cuốn chiếu (Rolling Summary)**: Khi số tin nhắn chưa tóm tắt vượt quá 30, kích hoạt tác vụ nền gọi model `fast` để cô đọng hội thoại thành đoạn tóm tắt dòng chảy (< 300 token) lưu vào bảng `summaries`. Tất cả lời gọi model `fast` đều ghi nhận token usage nguyên tử vào quota ngày.
 3. **Ký ức dài hạn (Semantic Long-term Memories)**:
-   - Chạy nền mỗi 6 tin của user hoặc sau 5 phút không hoạt động.
+   - Chạy nền mỗi 6 tin của user hoặc sau 5 phút không hoạt động (được quản lý bằng asyncio timer task riêng theo từng user, tự động reset mỗi khi user gửi tin mới).
    - Dùng model `fast` ở chế độ JSON mode để trích xuất các sự kiện, sở thích, mục tiêu, cảm xúc sâu sắc về user thành các thao tác `add`, `update`, `delete`.
    - Lưu trữ vector 384 chiều (`intfloat/multilingual-e5-small`) vào PostgreSQL `pgvector`.
    - **Xếp hạng tái điều hướng (Composite Reranking)**:
@@ -58,40 +58,38 @@ User gửi tin ──► Meta Webhook ──► GET /webhook: verify challenge (
 
 ```
 app/
-├── main.py                  # Tạo FastAPI app, lifespan, mount routers
-├── core/
-│   ├── settings.py          # Pydantic-settings, fail-fast startup
-│   ├── db.py                # Async engine & sessionmaker (lru_cache)
-│   └── logging.py           # Logging bảo mật (không in token hay nội dung ở INFO)
-├── api/
+├── api/                     # webhook, health, dependencies
 │   ├── webhook.py           # Webhook Meta (GET challenge, POST event)
-│   └── health.py            # Healthcheck API
-├── messenger/
-│   ├── security.py          # HMAC-SHA256 signature verification
-│   ├── client.py            # Async HTTP client, typing_on, bubble splitter
-│   └── dedupe.py            # In-memory LRU deduplication theo mid
-├── llm/
-│   ├── base.py              # Protocol LLMProvider & LLMResult
-│   ├── groq_provider.py     # AsyncGroq, retry backoff jitter, fallback chain
-│   └── budget.py            # Quản lý quota token ngày, tự hạ tier khi > 90%
-├── memory/
-│   ├── models.py            # SQLAlchemy models (users, messages, memories, summaries, llm_usage)
-│   ├── store.py             # CRUD data access layer
-│   ├── embedder.py          # multilingual-e5-small CPU trong asyncio.to_thread
+│   ├── health.py            # Healthcheck API
+│   └── dependencies.py      # Dependency injection qua app.state và Depends
+├── chat/                    # Tầng điều phối hội thoại
+│   ├── orchestrator.py      # ChatOrchestrator tách các bước TurnContext rõ ràng
+│   ├── debounce.py          # MessageDebouncer gộp tin nhắn & dọn dẹp lock/buffer
+│   └── commands.py          # Lệnh /help, /nho, /quen
+├── persona/                 # Persona & style
+│   ├── style.py             # Feature extractor, EMA mirror & render hướng dẫn
+│   ├── prompt.py            # Ghép prompt theo thứ tự chuẩn mực
+│   └── safety.py            # Bộ lọc khủng hoảng & chống sao chép độc hại
+├── memory/                  # Logic AI trí nhớ
 │   ├── window.py            # Ước lượng token & cắt sliding window
 │   ├── summarizer.py        # Tóm tắt cuốn chiếu nền
 │   ├── extractor.py         # Trích xuất sự kiện JSON nền
 │   └── retriever.py         # Truy hồi vector & công thức re-rank đa yếu tố
-├── persona/
-│   ├── style.py             # Feature extractor, EMA mirror & render hướng dẫn
-│   ├── prompt.py            # Ghép prompt theo thứ tự chuẩn mực
-│   └── safety.py            # Bộ lọc khủng hoảng & chống sao chép độc hại
-├── chat/
-│   ├── orchestrator.py      # Điều phối pipeline lượt hội thoại
-│   ├── debounce.py          # Gộp tin nhắn liên tiếp (~2.5s) & lock tuần tự
-│   └── commands.py          # Lệnh /help, /nho, /quen
+├── db/                      # Cơ sở dữ liệu & Data Access Layer
+│   ├── models.py            # SQLAlchemy models (User, Message, Memory, Summary, LLMUsage)
+│   └── store.py             # Repository pattern (flush trong hàm, commit ở điều phối)
+├── integrations/            # Tích hợp dịch vụ bên ngoài
+│   ├── messenger/           # client (Meta Graph API), dedupe (LRU cache), security (HMAC)
+│   ├── llm/                 # base (LLMProvider), groq_provider, budget (đếm token atomic)
+│   └── embedder.py          # sentence-transformers multilingual-e5-small CPU
+├── core/                    # Hạ tầng ứng dụng
+│   ├── settings.py          # Pydantic-settings, fail-fast startup
+│   ├── db.py                # Async engine & sessionmaker (lru_cache)
+│   ├── logging.py           # Logging bảo mật (không in token hay nội dung ở INFO)
+│   └── tasks.py             # Giữ reference tác vụ nền và log lỗi tự động
+├── main.py                  # FastAPI app, lifespan khởi tạo app.state, mount routers
 alembic/                     # Alembic database migrations
-tests/                       # Toàn bộ test suite (mock mạng, không gọi API thật)
+tests/                       # Toàn bộ test suite (mock mạng, chạy in-memory SQLite)
 ```
 
 ---
@@ -189,25 +187,35 @@ pytest -v
 ```
 Kiểm thử bao gồm:
 - Xác thực chữ ký HMAC-SHA256 (`test_security.py`)
-- Deduplication tin nhắn trùng lặp `mid` (`test_dedupe.py`)
+- Deduplication tin nhắn trong RAM LRU cache (`test_dedupe.py`)
+- Deduplication bền vững qua unique constraint DB & lưu `mid` (`test_dedupe_db.py`)
 - Webhook phản hồi 200 nhanh và xử lý file đính kèm phi văn bản (`test_webhook.py`)
 - Gộp tin nhắn liên tiếp bằng Debounce (`test_debounce.py`)
+- Tự động dọn dẹp user locks và buffers trong Debouncer (`test_debounce_cleanup.py`)
 - Cắt sliding window theo token budget (`test_window.py`)
 - Phân tích phong cách EMA và phát hiện xưng hô tiếng Việt (`test_style.py`)
 - Công thức xếp hạng ký ức đa yếu tố của Retriever (`test_retriever.py`)
 - Trích xuất ký ức qua JSON và khả năng tự phục hồi khi JSON lỗi (`test_extractor.py`)
+- Bộ đếm thời gian 5 phút không hoạt động kích hoạt trích xuất ký ức (`test_inactivity_extractor.py`)
 - Groq Provider: thử lại với exponential backoff 429, fallback sang `fast` tier và câu dự phòng thân thiện (`test_groq_provider.py`)
 - Cơ chế tự động hạ tier khi vượt quá 90% ngân sách token (`test_budget.py`)
+- Đếm token nguyên tử cho mọi lời gọi LLM (summarizer, extractor) (`test_fast_budget_usage.py`)
 - Xóa sạch dữ liệu người dùng với lệnh `/quen` (`test_commands.py`)
 - Phát hiện khủng hoảng và tắt mirror phong cách (`test_safety.py`)
+- Không giữ DB session trong lúc gọi LLM (`test_session_lifecycle.py`)
+- Ghi nguyên tử message user + assistant + profile trong 1 transaction (`test_atomic_turn_transaction.py`)
+- Giữ reference cho task nền và log lỗi ngoại lệ unhandled (`test_background_tasks.py`)
+- Phân rã vòng đời lượt hội thoại rõ ràng qua `TurnContext` (`test_turn_lifecycle.py`)
+- Khởi tạo trong `lifespan` và inject dependency qua FastAPI `Depends` (`test_dependency_injection.py`)
 
 ---
 
 ## 8. Giới hạn đã biết (Known Limitations)
 
-1. **Kiến trúc Single Worker (1 Worker)**: Hệ thống được thiết kế chạy với 1 worker process (`--workers 1`). Giả định này giúp quản lý debouncing in-memory và `asyncio.Lock` tuần tự hóa theo từng người dùng một cách đơn giản, chính xác tuyệt đối mà không cần bổ sung Redis cluster.
+1. **Kiến trúc Single Worker (1 Worker)**: Hệ thống được thiết kế chạy với 1 worker process (`--workers 1`). Giả định này giúp quản lý debouncing in-memory, các timer không hoạt động (`_inactivity_timers`), và `asyncio.Lock` tuần tự hóa theo từng người dùng một cách đơn giản, chính xác tuyệt đối mà không cần bổ sung Redis cluster. Nếu muốn mở rộng multi-worker hoặc scale ngang trong tương lai, cần bổ sung một tầng điều phối dùng chung (như Redis Streams hoặc Pub/Sub) cho debounce và distributed lock.
 2. **Cửa sổ tin nhắn 24 giờ của Meta (24-Hour Messaging Window)**: Theo chính sách tiêu chuẩn của Facebook Messenger, bot chỉ có thể phản hồi tin nhắn trong vòng 24 giờ kể từ tin nhắn gần nhất của người dùng.
 3. **Chế độ phát triển của Meta App (Development Mode)**: Khi ứng dụng Meta đang ở chế độ Development (chưa duyệt Public Live), chỉ các tài khoản Facebook có vai trò trong ứng dụng (Admin, Developer, hoặc Tester) mới có thể nhắn tin và nhận phản hồi từ chatbot.
+4. **Bộ nhớ RAM cho Embedder**: Model `sentence-transformers` được nạp trực tiếp vào RAM trên CPU (chiếm ~150-200MB RAM). Khuyến nghị máy chủ có tối thiểu 1GB RAM để hoạt động ổn định.
 
 ---
 
