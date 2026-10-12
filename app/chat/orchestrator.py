@@ -16,6 +16,7 @@ Coordinates full conversational turn execution in strict order:
 import asyncio
 from datetime import datetime, timezone
 from typing import Any, Optional
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.db import get_async_session_maker
@@ -33,6 +34,7 @@ from app.memory.store import (
     get_recent_messages,
     get_summary,
     get_user_message_count,
+    is_message_mid_exists,
     update_user_profiles,
 )
 from app.memory.summarizer import maybe_run_rolling_summary
@@ -78,13 +80,18 @@ class ChatOrchestrator:
         except Exception as exc:
             logger.error("Error executing background tasks for user_id=%d: %s", user_id, exc)
 
-    async def handle_turn(self, psid: str, text: str) -> None:
+    async def handle_turn(self, psid: str, text: str, mid: Optional[str] = None) -> None:
         """Process one conversational turn for user."""
         clean_text = text.strip()
         if not clean_text:
             return
 
         async with self._session_factory() as session:
+            # Step 0: Deduplicate via DB if mid provided
+            if mid and await is_message_mid_exists(session, mid):
+                logger.info("Ignoring duplicate message mid via DB: %s", mid)
+                return
+
             # Step 1: User lookup / creation
             user = await get_or_create_user(session, psid)
 
@@ -95,7 +102,11 @@ class ChatOrchestrator:
                     await self._messenger.send_human_like_response(psid, cmd_reply)
                     # For non-destructive commands, record dialog turn
                     if clean_text.split()[0].lower() != "/quen":
-                        await add_message(session, user.id, "user", clean_text)
+                        try:
+                            await add_message(session, user.id, "user", clean_text, mid=mid)
+                        except IntegrityError:
+                            await session.rollback()
+                            return
                         await add_message(session, user.id, "assistant", cmd_reply)
                 return
 
@@ -167,7 +178,12 @@ class ChatOrchestrator:
 
             # Step 11: Persist messages & profile updates
             now = datetime.now(timezone.utc)
-            await add_message(session, user.id, "user", clean_text)
+            try:
+                await add_message(session, user.id, "user", clean_text, mid=mid)
+            except IntegrityError:
+                await session.rollback()
+                logger.warning("Duplicate message mid prevented by unique constraint: %s", mid)
+                return
             await add_message(session, user.id, "assistant", llm_result.content)
             await update_user_profiles(
                 session,

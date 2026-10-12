@@ -84,6 +84,13 @@ async def add_message(
     return msg
 
 
+async def is_message_mid_exists(session: AsyncSession, mid: str) -> bool:
+    """Check if a message with the specified mid already exists in the database."""
+    stmt = select(Message.id).where(Message.mid == mid).limit(1)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none() is not None
+
+
 async def get_recent_messages(
     session: AsyncSession,
     user_id: int,

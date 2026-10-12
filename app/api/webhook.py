@@ -77,9 +77,16 @@ async def handle_messaging_event(messaging: dict[str, Any]) -> None:
         if not text:
             return
 
-        async def _run_orchestrator(psid: str, combined: str) -> None:
+        async def _run_orchestrator(psid: str, combined: str, mid: str | None = None) -> None:
             if _turn_handler is not None:
-                await _turn_handler(psid, combined)
+                import inspect
+                sig = inspect.signature(_turn_handler)
+                if "mid" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                    await _turn_handler(psid, combined, mid=mid)
+                elif len(sig.parameters) >= 3:
+                    await _turn_handler(psid, combined, mid)
+                else:
+                    await _turn_handler(psid, combined)
             else:
                 client = get_messenger_client()
                 await client.send_human_like_response(
@@ -87,7 +94,7 @@ async def handle_messaging_event(messaging: dict[str, Any]) -> None:
                     "Chào bạn! Hệ thống đang khởi động, hãy thử lại sau ít phút nhé.",
                 )
 
-        await debouncer.add_message(sender_id, text, _run_orchestrator)
+        await debouncer.add_message(sender_id, text, _run_orchestrator, mid=mid)
     else:
         # User sent non-text attachment (photo, sticker, audio, etc.)
         client = get_messenger_client()
