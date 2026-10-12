@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.db import get_async_session_maker
 from app.core.logging import get_logger
+from app.core.tasks import create_background_task
 from app.chat.commands import handle_command, is_command
 from app.llm.base import LLMProvider
 from app.llm.budget import record_llm_usage, should_downgrade_to_fast
@@ -210,13 +211,14 @@ class ChatOrchestrator:
         # Step 12: Deliver response through Messenger client (mark_seen, typing, bubble delay)
         await self._messenger.send_human_like_response(psid, llm_result.content)
 
-        # Step 13: Schedule background tasks asynchronously
-        asyncio.create_task(
+        # Step 13: Schedule background tasks asynchronously with strong reference tracking
+        create_background_task(
             self._run_background_tasks(
                 user_id=user_id,
                 user_msg_count=user_msg_count + 1,
                 last_user_msg_at=now,
-            )
+            ),
+            name=f"bg_tasks_user_{user_id}",
         )
 
 
