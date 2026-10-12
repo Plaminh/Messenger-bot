@@ -227,8 +227,10 @@ async def get_all_memories(session: AsyncSession, user_id: int) -> list[Memory]:
 
 
 async def delete_all_user_data(session: AsyncSession, user_id: int) -> None:
-    """Completely wipe all user data across all tables via cascade deletion."""
-    stmt = delete(User).where(User.id == user_id)
-    await session.execute(stmt)
+    """Completely wipe all user data across all tables."""
+    await session.execute(delete(Message).where(Message.user_id == user_id))
+    await session.execute(delete(Memory).where(Memory.user_id == user_id))
+    await session.execute(delete(Summary).where(Summary.user_id == user_id))
+    await session.execute(delete(User).where(User.id == user_id))
     await session.commit()
     logger.info("Wiped all records for user_id=%d", user_id)
