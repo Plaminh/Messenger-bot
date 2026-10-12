@@ -107,6 +107,44 @@ async def get_recent_messages(
     return messages
 
 
+async def get_messages_after(
+    session: AsyncSession,
+    user_id: int,
+    after_id: Optional[int],
+    limit: int = 30,
+) -> list[Message]:
+    """Retrieve up to limit messages with id > after_id, oldest first."""
+    stmt = (
+        select(Message)
+        .where(Message.user_id == user_id, Message.id > (after_id or 0))
+        .order_by(Message.id.asc())
+        .limit(limit)
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def get_last_extracted_message_id(session: AsyncSession, user_id: int) -> Optional[int]:
+    """Return the last message id processed by the memory extractor."""
+    stmt = select(User.last_extracted_message_id).where(User.id == user_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def set_last_extracted_message_id(
+    session: AsyncSession,
+    user_id: int,
+    message_id: int,
+) -> None:
+    """Advance the extractor watermark (never moves backwards)."""
+    current = await get_last_extracted_message_id(session, user_id)
+    if current is not None and current >= message_id:
+        return
+    stmt = update(User).where(User.id == user_id).values(last_extracted_message_id=message_id)
+    await session.execute(stmt)
+    await session.flush()
+
+
 async def get_unsummarized_messages(
     session: AsyncSession,
     user_id: int,
@@ -194,11 +232,17 @@ async def update_memory(
     category: str,
     importance: int,
     embedding: list[float],
-) -> None:
-    """Update content and vector representation of an existing memory."""
+    *,
+    user_id: int,
+) -> bool:
+    """Update an existing memory. Only touches rows owned by user_id.
+
+    Returns True if a row was updated, False if the memory does not exist
+    or belongs to another user.
+    """
     stmt = (
         update(Memory)
-        .where(Memory.id == memory_id)
+        .where(Memory.id == memory_id, Memory.user_id == user_id)
         .values(
             content=content,
             category=category,
@@ -207,15 +251,20 @@ async def update_memory(
             last_accessed_at=func.now(),
         )
     )
-    await session.execute(stmt)
+    result = await session.execute(stmt)
     await session.flush()
+    return (result.rowcount or 0) > 0
 
 
-async def delete_memory(session: AsyncSession, memory_id: int) -> None:
-    """Delete a memory by id."""
-    stmt = delete(Memory).where(Memory.id == memory_id)
-    await session.execute(stmt)
+async def delete_memory(session: AsyncSession, memory_id: int, *, user_id: int) -> bool:
+    """Delete a memory by id. Only deletes rows owned by user_id.
+
+    Returns True if a row was deleted, False otherwise.
+    """
+    stmt = delete(Memory).where(Memory.id == memory_id, Memory.user_id == user_id)
+    result = await session.execute(stmt)
     await session.flush()
+    return (result.rowcount or 0) > 0
 
 
 async def get_all_memories(session: AsyncSession, user_id: int) -> list[Memory]:

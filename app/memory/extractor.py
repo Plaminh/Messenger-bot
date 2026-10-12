@@ -13,7 +13,10 @@ from app.core.logging import get_logger
 from app.db.store import (
     add_memory,
     delete_memory,
+    get_last_extracted_message_id,
+    get_messages_after,
     get_recent_messages,
+    set_last_extracted_message_id,
     update_memory,
 )
 from app.integrations.embedder import TextEmbedder, get_embedder
@@ -25,6 +28,8 @@ logger = get_logger(__name__)
 
 EXTRACTION_MESSAGE_INTERVAL = 6
 EXTRACTION_INACTIVITY_SECONDS = 300  # 5 minutes
+EXTRACTION_FIRST_RUN_MESSAGES = 12  # no watermark yet: look at the latest N messages
+EXTRACTION_MAX_BATCH_MESSAGES = 30  # per run, messages after the watermark
 
 
 def should_trigger_extraction(
@@ -52,7 +57,18 @@ async def extract_and_sync_memories(
     embedder: Optional[TextEmbedder] = None,
 ) -> None:
     """Extract durable facts from recent dialogue and synchronize memory store."""
-    recent_msgs = await get_recent_messages(session, user_id, limit=10)
+    # Only look at messages newer than the last extraction watermark so the same
+    # dialogue is never extracted twice (message-count trigger + inactivity timer).
+    last_extracted_id = await get_last_extracted_message_id(session, user_id)
+    if last_extracted_id is None:
+        recent_msgs = await get_recent_messages(session, user_id, limit=EXTRACTION_FIRST_RUN_MESSAGES)
+    else:
+        recent_msgs = await get_messages_after(
+            session,
+            user_id,
+            last_extracted_id,
+            limit=EXTRACTION_MAX_BATCH_MESSAGES,
+        )
     if len(recent_msgs) < 2:
         return
 
@@ -119,6 +135,11 @@ async def extract_and_sync_memories(
         if res.usage_tokens > 0:
             await record_llm_usage(session, res.model, res.usage_tokens)
 
+        if res.tier == "fallback":
+            # LLM unavailable: keep the watermark so these messages are retried later
+            await session.commit()
+            return
+
         data = json.loads(res.content)
         ops = []
         if isinstance(data, list):
@@ -127,6 +148,8 @@ async def extract_and_sync_memories(
             ops = data.get("operations", []) or data.get("memories", [])
 
         if not isinstance(ops, list):
+            await set_last_extracted_message_id(session, user_id, recent_msgs[-1].id)
+            await session.commit()
             return
 
         source_msg_ids = [m.id for m in recent_msgs[-3:]]
@@ -155,21 +178,30 @@ async def extract_and_sync_memories(
 
             elif op == "update" and fact and mem_id:
                 vec = await embedder_instance.embed_passage(fact)
-                await update_memory(
+                updated = await update_memory(
                     session,
                     memory_id=int(mem_id),
                     content=fact,
                     category=category,
                     importance=importance,
                     embedding=vec,
+                    user_id=user_id,
                 )
-                logger.info("Updated memory id=%s for user_id=%d", mem_id, user_id)
+                if updated:
+                    logger.info("Updated memory id=%s for user_id=%d", mem_id, user_id)
+                else:
+                    logger.warning("Ignored update of memory id=%s not owned by user_id=%d", mem_id, user_id)
 
             elif op == "delete" and mem_id:
-                await delete_memory(session, memory_id=int(mem_id))
-                logger.info("Deleted memory id=%s for user_id=%d", mem_id, user_id)
+                deleted = await delete_memory(session, memory_id=int(mem_id), user_id=user_id)
+                if deleted:
+                    logger.info("Deleted memory id=%s for user_id=%d", mem_id, user_id)
+                else:
+                    logger.warning("Ignored delete of memory id=%s not owned by user_id=%d", mem_id, user_id)
 
+        await set_last_extracted_message_id(session, user_id, recent_msgs[-1].id)
         await session.commit()
 
     except Exception as exc:
+        await session.rollback()
         logger.error("Failed extracting memories for user_id=%d: %s", user_id, exc)
