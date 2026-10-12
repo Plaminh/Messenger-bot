@@ -43,6 +43,8 @@ class User(Base):
         nullable=False,
     )
     last_user_msg_at = Column(DateTime(timezone=True), nullable=True)
+    # Highest message id already processed by the memory extractor
+    last_extracted_message_id = Column(Integer, nullable=True)
 
     # Relationships
     messages = relationship("Message", back_populates="user", cascade="all, delete-orphan")
