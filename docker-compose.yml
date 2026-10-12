@@ -1,93 +1,46 @@
-version: '3.8'
-
 services:
-  # PostgreSQL Database
   db:
-    image: postgres:15-alpine
-    container_name: vi_vu_postgres
+    image: pgvector/pgvector:pg16
+    container_name: messenger_bot_db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-dev_password_123}
-      POSTGRES_DB: ${DB_NAME:-vi_vu_danang}
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-messenger_bot}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql
-      - ./migrations/002_seed_data.sql:/docker-entrypoint-initdb.d/002_seed_data.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-messenger_bot}"]
+      interval: 5s
       timeout: 5s
       retries: 5
     networks:
-      - vi_vu_network
+      - bot_network
 
-  # FastAPI Backend
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: vi_vu_api
+    container_name: messenger_bot_api
+    restart: unless-stopped
     env_file: .env
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    environment:
-      # Meta API
-      META_VERIFY_TOKEN: ${META_VERIFY_TOKEN:-your_verify_token}
-      META_PAGE_ACCESS_TOKEN: ${META_PAGE_ACCESS_TOKEN:-your_page_token}
-      META_API_VERSION: ${META_API_VERSION:-v18.0}
-      
-      # Database
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-dev_password_123}@db:5432/${DB_NAME:-vi_vu_danang}
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-dev_password_123}
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-vi_vu_danang}
-      
-      # Gemini AI - Round-Robin 9 Keys (Phase 1.5)
-      GEMINI_API_KEY_1: ${GEMINI_API_KEY_1:-}
-      GEMINI_API_KEY_2: ${GEMINI_API_KEY_2:-}
-      GEMINI_API_KEY_3: ${GEMINI_API_KEY_3:-}
-      GEMINI_API_KEY_4: ${GEMINI_API_KEY_4:-}
-      GEMINI_API_KEY_5: ${GEMINI_API_KEY_5:-}
-      GEMINI_API_KEY_6: ${GEMINI_API_KEY_6:-}
-      GEMINI_API_KEY_7: ${GEMINI_API_KEY_7:-}
-      GEMINI_API_KEY_8: ${GEMINI_API_KEY_8:-}
-      GEMINI_API_KEY_9: ${GEMINI_API_KEY_9:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
-      
-      # App Settings
-      DEBUG: ${DEBUG:-True}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "8000:8000"
-    volumes:
-      - .:/app
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     networks:
-      - vi_vu_network
-
-  # pgAdmin - Database Management GUI (Phase 1)
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: vi_vu_pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@example.com
-      PGADMIN_DEFAULT_PASSWORD: admin123
-    ports:
-      - "5050:80"
-    depends_on:
-      - db
-    networks:
-      - vi_vu_network
+      - bot_network
 
 volumes:
   postgres_data:
     driver: local
 
 networks:
-  vi_vu_network:
+  bot_network:
     driver: bridge

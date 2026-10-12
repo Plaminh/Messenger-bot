@@ -1,31 +1,33 @@
-# Use Python 3.11 slim image
 FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONPATH=/app:$PYTHONPATH
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    HF_HOME=/app/.cache/huggingface
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    postgresql-client \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
-COPY requirements.txt .
+# Create non-root user
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app/.cache/huggingface && \
+    chown -R appuser:appuser /app
 
-# Install Python dependencies
+# Copy requirements and install
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the entire project
+# Copy application source code
 COPY . .
+RUN chown -R appuser:appuser /app
 
-# Expose the API port
+USER appuser
+
 EXPOSE 8000
 
-# Use Python script for startup (handles path setup)
-CMD ["python", "/app/run.py"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1"]
