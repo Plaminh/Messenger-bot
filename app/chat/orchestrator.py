@@ -14,6 +14,7 @@ Coordinates full conversational turn execution in strict order:
 """
 
 import asyncio
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 from sqlalchemy.exc import IntegrityError
@@ -33,7 +34,7 @@ from app.db.store import (
     update_user_profiles,
 )
 from app.integrations.embedder import TextEmbedder, get_embedder
-from app.integrations.llm.base import LLMProvider
+from app.integrations.llm.base import LLMProvider, LLMResult
 from app.integrations.llm.budget import record_llm_usage, should_downgrade_to_fast
 from app.integrations.llm.groq_provider import GroqProvider
 from app.integrations.messenger.client import MessengerClient, get_messenger_client
@@ -46,6 +47,21 @@ from app.persona.safety import is_crisis
 from app.persona.style import detect_pronouns, update_style_profile
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class TurnContext:
+    """Encapsulates context prepared for a conversational turn."""
+
+    psid: str
+    user_id: int
+    clean_text: str
+    mid: Optional[str] = None
+    core_profile: dict[str, Any] = field(default_factory=dict)
+    updated_style: dict[str, Any] = field(default_factory=dict)
+    full_messages: list[dict[str, str]] = field(default_factory=list)
+    tier: str = "main"
+    user_msg_count: int = 0
 
 
 class ChatOrchestrator:
@@ -108,11 +124,16 @@ class ChatOrchestrator:
         except Exception as exc:
             logger.error("Error executing background tasks for user_id=%d: %s", user_id, exc)
 
-    async def handle_turn(self, psid: str, text: str, mid: Optional[str] = None) -> None:
-        """Process one conversational turn for user."""
+    async def prepare_context(
+        self,
+        psid: str,
+        text: str,
+        mid: Optional[str] = None,
+    ) -> Optional[TurnContext]:
+        """Prepare conversational context, checking deduplication and building prompt messages."""
         clean_text = text.strip()
         if not clean_text:
-            return
+            return None
 
         # Cancel any pending inactivity timer for this user immediately upon new activity
         pending_timer = self._inactivity_timers.pop(psid, None)
@@ -124,7 +145,7 @@ class ChatOrchestrator:
             # Step 0: Deduplicate via DB if mid provided
             if mid and await is_message_mid_exists(read_session, mid):
                 logger.info("Ignoring duplicate message mid via DB: %s", mid)
-                return
+                return None
 
             # Step 1: User lookup / creation
             user = await get_or_create_user(read_session, psid)
@@ -140,10 +161,10 @@ class ChatOrchestrator:
                             await add_message(read_session, user.id, "user", clean_text, mid=mid)
                         except IntegrityError:
                             await read_session.rollback()
-                            return
+                            return None
                         await add_message(read_session, user.id, "assistant", cmd_reply)
                 await read_session.commit()
-                return
+                return None
 
             user_id = user.id
             core_profile = dict(user.core_profile or {})
@@ -171,7 +192,7 @@ class ChatOrchestrator:
             tier = "fast" if downgrade else "main"
             await read_session.commit()
 
-        # ---------------- Phase 2: In-Memory Prep & LLM Call (No DB Session Held) ----------------
+        # ---------------- Phase 2: In-Memory Prep (No DB Session Held) ----------------
         # Step 3: Pronoun detection in early messages
         if "pronouns" not in core_profile:
             detected_p = detect_pronouns(clean_text)
@@ -204,55 +225,96 @@ class ChatOrchestrator:
             current_user_text=clean_text,
         )
 
-        # Step 10: Call LLM without holding any database connection/session
-        llm_result = await self._llm.generate(
-            full_messages,
-            model_tier=tier,
+        return TurnContext(
+            psid=psid,
+            user_id=user_id,
+            clean_text=clean_text,
+            mid=mid,
+            core_profile=core_profile,
+            updated_style=updated_style,
+            full_messages=full_messages,
+            tier=tier,
+            user_msg_count=user_msg_count,
+        )
+
+    async def generate_reply(self, ctx: TurnContext) -> LLMResult:
+        """Call LLM without holding any database connection/session."""
+        return await self._llm.generate(
+            ctx.full_messages,
+            model_tier=ctx.tier,
             temperature=0.9,
             max_tokens=300,
         )
 
-        # ---------------- Phase 3: DB Write Session ----------------
-        now = datetime.now(timezone.utc)
+    async def persist_turn(
+        self,
+        ctx: TurnContext,
+        reply: LLMResult,
+        now: Optional[datetime] = None,
+    ) -> bool:
+        """Persist messages, token usage, and user profiles in a single atomic transaction."""
+        write_time = now or datetime.now(timezone.utc)
         async with self._session_factory() as write_session:
             try:
                 # Record token consumption
-                if llm_result.usage_tokens > 0:
-                    await record_llm_usage(write_session, llm_result.model, llm_result.usage_tokens)
+                if reply.usage_tokens > 0:
+                    await record_llm_usage(write_session, reply.model, reply.usage_tokens)
 
-                # Step 11: Persist messages & profile updates in a single atomic transaction
-                await add_message(write_session, user_id, "user", clean_text, mid=mid)
-                await add_message(write_session, user_id, "assistant", llm_result.content)
+                # Persist messages & profile updates in a single atomic transaction
+                await add_message(write_session, ctx.user_id, "user", ctx.clean_text, mid=ctx.mid)
+                await add_message(write_session, ctx.user_id, "assistant", reply.content)
                 await update_user_profiles(
                     write_session,
-                    user_id,
-                    style_profile=updated_style,
-                    core_profile=core_profile,
-                    last_user_msg_at=now,
+                    ctx.user_id,
+                    style_profile=ctx.updated_style,
+                    core_profile=ctx.core_profile,
+                    last_user_msg_at=write_time,
                 )
                 await write_session.commit()
+                return True
             except IntegrityError:
                 await write_session.rollback()
-                logger.warning("Duplicate message mid prevented by unique constraint: %s", mid)
-                return
+                logger.warning("Duplicate message mid prevented by unique constraint: %s", ctx.mid)
+                return False
             except Exception:
                 await write_session.rollback()
                 raise
 
-        # ---------------- Phase 4: Delivery & Async Background Tasks ----------------
-        # Step 12: Deliver response through Messenger client (mark_seen, typing, bubble delay)
-        await self._messenger.send_human_like_response(psid, llm_result.content)
-
-        # Step 13: Schedule background tasks asynchronously with strong reference tracking
+    def schedule_background(
+        self,
+        ctx: TurnContext,
+        now: Optional[datetime] = None,
+    ) -> None:
+        """Schedule asynchronous rolling summarization and inactivity extraction."""
+        bg_time = now or datetime.now(timezone.utc)
         create_background_task(
             self._run_background_tasks(
-                user_id=user_id,
-                user_msg_count=user_msg_count + 1,
-                last_user_msg_at=now,
+                user_id=ctx.user_id,
+                user_msg_count=ctx.user_msg_count + 1,
+                last_user_msg_at=bg_time,
             ),
-            name=f"bg_tasks_user_{user_id}",
+            name=f"bg_tasks_user_{ctx.user_id}",
         )
-        self._schedule_inactivity_timer(psid, user_id)
+        self._schedule_inactivity_timer(ctx.psid, ctx.user_id)
+
+    async def handle_turn(self, psid: str, text: str, mid: Optional[str] = None) -> None:
+        """Process one conversational turn for user."""
+        ctx = await self.prepare_context(psid, text, mid)
+        if ctx is None:
+            return
+
+        reply = await self.generate_reply(ctx)
+
+        now = datetime.now(timezone.utc)
+        persisted = await self.persist_turn(ctx, reply, now)
+        if not persisted:
+            return
+
+        # Deliver response through Messenger client (mark_seen, typing, bubble delay)
+        await self._messenger.send_human_like_response(ctx.psid, reply.content)
+
+        # Schedule background tasks asynchronously with strong reference tracking
+        self.schedule_background(ctx, now)
 
 
 # Global orchestrator singleton
