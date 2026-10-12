@@ -315,15 +315,3 @@ class ChatOrchestrator:
 
         # Schedule background tasks asynchronously with strong reference tracking
         self.schedule_background(ctx, now)
-
-
-# Global orchestrator singleton
-_orchestrator: Optional[ChatOrchestrator] = None
-
-
-def get_orchestrator() -> ChatOrchestrator:
-    """Return shared ChatOrchestrator singleton."""
-    global _orchestrator
-    if _orchestrator is None:
-        _orchestrator = ChatOrchestrator()
-    return _orchestrator

@@ -7,7 +7,10 @@ from fastapi import FastAPI
 from app.core.logging import configure_logging, get_logger
 from app.api.health import router as health_router
 from app.api.webhook import router as webhook_router
-from app.integrations.messenger.client import get_messenger_client, set_messenger_client
+from app.chat.debounce import MessageDebouncer
+from app.chat.orchestrator import ChatOrchestrator
+from app.integrations.messenger.client import MessengerClient
+from app.integrations.messenger.dedupe import MessageDeduplicator
 
 logger = get_logger(__name__)
 
@@ -17,15 +20,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan managing startup and graceful shutdown."""
     configure_logging()
     logger.info("Initializing Messenger Friend Bot...")
-    from app.api.webhook import set_turn_handler
-    from app.chat.orchestrator import get_orchestrator
-    set_turn_handler(get_orchestrator().handle_turn)
+    messenger_client = MessengerClient()
+    app.state.messenger_client = messenger_client
+    app.state.orchestrator = ChatOrchestrator(messenger_client=messenger_client)
+    app.state.debouncer = MessageDebouncer()
+    app.state.deduplicator = MessageDeduplicator()
+
     yield
+
     logger.info("Shutting down Messenger Friend Bot...")
-    set_turn_handler(None)
-    client = get_messenger_client()
-    await client.aclose()
-    set_messenger_client(None)
+    client = getattr(app.state, "messenger_client", None)
+    if client:
+        await client.aclose()
 
 
 def create_app() -> FastAPI:
@@ -36,6 +42,13 @@ def create_app() -> FastAPI:
         version="1.0.0",
         lifespan=lifespan,
     )
+
+    # Pre-populate state for testing or standalone execution
+    messenger_client = MessengerClient()
+    app.state.messenger_client = messenger_client
+    app.state.orchestrator = ChatOrchestrator(messenger_client=messenger_client)
+    app.state.debouncer = MessageDebouncer()
+    app.state.deduplicator = MessageDeduplicator()
 
     # Mount routers
     app.include_router(health_router)

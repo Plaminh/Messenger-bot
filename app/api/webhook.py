@@ -5,17 +5,23 @@ Immediately acknowledges events with HTTP 200 and processes messages asynchronou
 """
 
 import json
-from collections.abc import Callable, Coroutine
-from typing import Any
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request, Response
+from typing import Any, Optional
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import PlainTextResponse
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.integrations.messenger.client import get_messenger_client
-from app.integrations.messenger.dedupe import deduplicator
+from app.api.dependencies import (
+    get_debouncer,
+    get_deduplicator,
+    get_messenger_client,
+    get_orchestrator,
+)
+from app.chat.debounce import MessageDebouncer
+from app.chat.orchestrator import ChatOrchestrator
+from app.integrations.messenger.client import MessengerClient
+from app.integrations.messenger.dedupe import MessageDeduplicator
 from app.integrations.messenger.security import verify_meta_signature
-from app.chat.debounce import debouncer
 
 logger = get_logger(__name__)
 
@@ -25,15 +31,6 @@ NON_TEXT_FALLBACK_MESSAGE = (
     "Hihi mình chưa xem được ảnh, sticker hay nghe voice được nè. "
     "Bạn gõ chữ tâm sự với mình nha! 😊"
 )
-
-# Pluggable turn processor (orchestrator attaches here)
-_turn_handler: Callable[[str, str], Coroutine[Any, Any, None]] | None = None
-
-
-def set_turn_handler(handler: Callable[[str, str], Coroutine[Any, Any, None]] | None) -> None:
-    """Set the turn processing coroutine (called by orchestrator)."""
-    global _turn_handler
-    _turn_handler = handler
 
 
 @router.get("/webhook")
@@ -53,7 +50,13 @@ async def verify_webhook(
     raise HTTPException(status_code=403, detail="Verification token mismatch")
 
 
-async def handle_messaging_event(messaging: dict[str, Any]) -> None:
+async def handle_messaging_event(
+    messaging: dict[str, Any],
+    orchestrator: ChatOrchestrator,
+    debouncer: MessageDebouncer,
+    deduplicator: MessageDeduplicator,
+    messenger_client: Optional[MessengerClient] = None,
+) -> None:
     """Process an individual messaging event extracted from webhook payload."""
     sender_info = messaging.get("sender")
     if not isinstance(sender_info, dict):
@@ -78,30 +81,25 @@ async def handle_messaging_event(messaging: dict[str, Any]) -> None:
             return
 
         async def _run_orchestrator(psid: str, combined: str, mid: str | None = None) -> None:
-            if _turn_handler is not None:
-                import inspect
-                sig = inspect.signature(_turn_handler)
-                if "mid" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-                    await _turn_handler(psid, combined, mid=mid)
-                elif len(sig.parameters) >= 3:
-                    await _turn_handler(psid, combined, mid)
-                else:
-                    await _turn_handler(psid, combined)
-            else:
-                client = get_messenger_client()
-                await client.send_human_like_response(
-                    psid,
-                    "Chào bạn! Hệ thống đang khởi động, hãy thử lại sau ít phút nhé.",
-                )
+            await orchestrator.handle_turn(psid, combined, mid=mid)
 
         await debouncer.add_message(sender_id, text, _run_orchestrator, mid=mid)
     else:
         # User sent non-text attachment (photo, sticker, audio, etc.)
-        client = get_messenger_client()
+        try:
+            client = get_messenger_client()
+        except TypeError:
+            client = messenger_client
         await client.send_human_like_response(sender_id, NON_TEXT_FALLBACK_MESSAGE)
 
 
-async def process_webhook_payload(payload_bytes: bytes) -> None:
+async def process_webhook_payload(
+    payload_bytes: bytes,
+    orchestrator: ChatOrchestrator,
+    debouncer: MessageDebouncer,
+    deduplicator: MessageDeduplicator,
+    messenger_client: MessengerClient,
+) -> None:
     """Parse and dispatch events from validated webhook payload."""
     try:
         data = json.loads(payload_bytes.decode("utf-8"))
@@ -115,7 +113,13 @@ async def process_webhook_payload(payload_bytes: bytes) -> None:
     for entry in data.get("entry", []):
         for messaging in entry.get("messaging", []):
             try:
-                await handle_messaging_event(messaging)
+                await handle_messaging_event(
+                    messaging,
+                    orchestrator=orchestrator,
+                    debouncer=debouncer,
+                    deduplicator=deduplicator,
+                    messenger_client=messenger_client,
+                )
             except Exception as exc:
                 logger.error("Error handling messaging event: %s", exc, exc_info=True)
 
@@ -125,6 +129,10 @@ async def receive_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
     x_hub_signature_256: str | None = Header(None, alias="X-Hub-Signature-256"),
+    orchestrator: ChatOrchestrator = Depends(get_orchestrator),
+    debouncer: MessageDebouncer = Depends(get_debouncer),
+    deduplicator: MessageDeduplicator = Depends(get_deduplicator),
+    messenger_client: MessengerClient = Depends(get_messenger_client),
 ) -> Response:
     """Receive and securely process Meta Messenger events."""
     settings = get_settings()
@@ -135,6 +143,13 @@ async def receive_webhook(
         raise HTTPException(status_code=403, detail="Invalid signature")
 
     # Fast 200 response to satisfy Meta webhook SLA, process payload in background
-    background_tasks.add_task(process_webhook_payload, body)
+    background_tasks.add_task(
+        process_webhook_payload,
+        body,
+        orchestrator=orchestrator,
+        debouncer=debouncer,
+        deduplicator=deduplicator,
+        messenger_client=messenger_client,
+    )
 
     return Response(content="EVENT_RECEIVED", status_code=200)

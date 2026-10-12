@@ -40,7 +40,3 @@ class MessageDeduplicator:
         """Clear cache (primarily for tests)."""
         with self._lock:
             self._cache.clear()
-
-
-# Default singleton instance
-deduplicator = MessageDeduplicator()

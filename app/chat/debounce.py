@@ -98,7 +98,3 @@ class MessageDebouncer:
                 # Cleanup per-user lock if no new messages queued or timers running
                 if psid not in self._buffers and psid not in self._timers:
                     self._user_locks.pop(psid, None)
-
-
-# Default global debouncer instance
-debouncer = MessageDebouncer()
