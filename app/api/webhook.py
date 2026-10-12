@@ -86,11 +86,10 @@ async def handle_messaging_event(
         await debouncer.add_message(sender_id, text, _run_orchestrator, mid=mid)
     else:
         # User sent non-text attachment (photo, sticker, audio, etc.)
-        try:
-            client = get_messenger_client()
-        except TypeError:
-            client = messenger_client
-        await client.send_human_like_response(sender_id, NON_TEXT_FALLBACK_MESSAGE)
+        if messenger_client is None:
+            logger.error("No MessengerClient available to answer non-text event")
+            return
+        await messenger_client.send_human_like_response(sender_id, NON_TEXT_FALLBACK_MESSAGE)
 
 
 async def process_webhook_payload(
