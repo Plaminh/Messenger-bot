@@ -86,120 +86,128 @@ class ChatOrchestrator:
         if not clean_text:
             return
 
-        async with self._session_factory() as session:
+        # ---------------- Phase 1: DB Read Session ----------------
+        async with self._session_factory() as read_session:
             # Step 0: Deduplicate via DB if mid provided
-            if mid and await is_message_mid_exists(session, mid):
+            if mid and await is_message_mid_exists(read_session, mid):
                 logger.info("Ignoring duplicate message mid via DB: %s", mid)
                 return
 
             # Step 1: User lookup / creation
-            user = await get_or_create_user(session, psid)
+            user = await get_or_create_user(read_session, psid)
 
             # Step 2: Command handling
             if is_command(clean_text):
-                cmd_reply = await handle_command(session, user, clean_text)
+                cmd_reply = await handle_command(read_session, user, clean_text)
                 if cmd_reply:
                     await self._messenger.send_human_like_response(psid, cmd_reply)
                     # For non-destructive commands, record dialog turn
                     if clean_text.split()[0].lower() != "/quen":
                         try:
-                            await add_message(session, user.id, "user", clean_text, mid=mid)
+                            await add_message(read_session, user.id, "user", clean_text, mid=mid)
                         except IntegrityError:
-                            await session.rollback()
+                            await read_session.rollback()
                             return
-                        await add_message(session, user.id, "assistant", cmd_reply)
+                        await add_message(read_session, user.id, "assistant", cmd_reply)
                 return
 
-            # Step 3: Pronoun detection in early messages
-            core = dict(user.core_profile or {})
-            if "pronouns" not in core:
-                detected_p = detect_pronouns(clean_text)
-                if detected_p:
-                    core["pronouns"] = detected_p
-
-            # Step 4: Statistical style analysis & EMA update
-            updated_style = update_style_profile(user.style_profile or {}, clean_text)
-
-            # Step 5: Safety check (crisis detection)
-            crisis_active = is_crisis(clean_text)
+            user_id = user.id
+            core_profile = dict(user.core_profile or {})
+            raw_style = dict(user.style_profile or {})
 
             # Step 6: Memory retrieval
             query_vec = await self._embedder.embed_query(clean_text)
             relevant_memories = await retrieve_relevant_memories(
-                session,
-                user.id,
+                read_session,
+                user_id,
                 query_vec,
                 top_k=6,
             )
 
             # Step 7: Summary & Recent dialog windowing
-            summary_record = await get_summary(session, user.id)
+            summary_record = await get_summary(read_session, user_id)
             summary_text = summary_record.content if summary_record else None
 
-            recent_history = await get_recent_messages(session, user.id, limit=30)
+            recent_history = await get_recent_messages(read_session, user_id, limit=30)
             window_messages = build_recent_window(recent_history, token_budget=850)
-
-            # Step 8: Prompt assembly
-            recent_user_texts = [m.content for m in window_messages if m.role == "user"]
-            user_msg_count = await get_user_message_count(session, user.id)
-            is_first_interaction = user_msg_count == 0
-
-            system_prompt = assemble_system_prompt(
-                core_profile=core,
-                style_profile=updated_style,
-                relevant_memories=relevant_memories,
-                summary_content=summary_text,
-                recent_user_messages=recent_user_texts,
-                is_crisis_active=crisis_active,
-                is_first_interaction=is_first_interaction,
-            )
-
-            full_messages = build_chat_messages(
-                system_prompt=system_prompt,
-                window_messages=window_messages,
-                current_user_text=clean_text,
-            )
+            user_msg_count = await get_user_message_count(read_session, user_id)
 
             # Step 9: Determine model tier via daily token budget
-            downgrade = await should_downgrade_to_fast(session)
+            downgrade = await should_downgrade_to_fast(read_session)
             tier = "fast" if downgrade else "main"
 
-            # Step 10: Call LLM
-            llm_result = await self._llm.generate(
-                full_messages,
-                model_tier=tier,
-                temperature=0.9,
-                max_tokens=300,
-            )
+        # ---------------- Phase 2: In-Memory Prep & LLM Call (No DB Session Held) ----------------
+        # Step 3: Pronoun detection in early messages
+        if "pronouns" not in core_profile:
+            detected_p = detect_pronouns(clean_text)
+            if detected_p:
+                core_profile["pronouns"] = detected_p
 
+        # Step 4: Statistical style analysis & EMA update
+        updated_style = update_style_profile(raw_style, clean_text)
+
+        # Step 5: Safety check (crisis detection)
+        crisis_active = is_crisis(clean_text)
+
+        # Step 8: Prompt assembly
+        recent_user_texts = [m.content for m in window_messages if m.role == "user"]
+        is_first_interaction = user_msg_count == 0
+
+        system_prompt = assemble_system_prompt(
+            core_profile=core_profile,
+            style_profile=updated_style,
+            relevant_memories=relevant_memories,
+            summary_content=summary_text,
+            recent_user_messages=recent_user_texts,
+            is_crisis_active=crisis_active,
+            is_first_interaction=is_first_interaction,
+        )
+
+        full_messages = build_chat_messages(
+            system_prompt=system_prompt,
+            window_messages=window_messages,
+            current_user_text=clean_text,
+        )
+
+        # Step 10: Call LLM without holding any database connection/session
+        llm_result = await self._llm.generate(
+            full_messages,
+            model_tier=tier,
+            temperature=0.9,
+            max_tokens=300,
+        )
+
+        # ---------------- Phase 3: DB Write Session ----------------
+        now = datetime.now(timezone.utc)
+        async with self._session_factory() as write_session:
             # Record token consumption
             if llm_result.usage_tokens > 0:
-                await record_llm_usage(session, llm_result.model, llm_result.usage_tokens)
+                await record_llm_usage(write_session, llm_result.model, llm_result.usage_tokens)
 
             # Step 11: Persist messages & profile updates
-            now = datetime.now(timezone.utc)
             try:
-                await add_message(session, user.id, "user", clean_text, mid=mid)
+                await add_message(write_session, user_id, "user", clean_text, mid=mid)
             except IntegrityError:
-                await session.rollback()
+                await write_session.rollback()
                 logger.warning("Duplicate message mid prevented by unique constraint: %s", mid)
                 return
-            await add_message(session, user.id, "assistant", llm_result.content)
+            await add_message(write_session, user_id, "assistant", llm_result.content)
             await update_user_profiles(
-                session,
-                user.id,
+                write_session,
+                user_id,
                 style_profile=updated_style,
-                core_profile=core,
+                core_profile=core_profile,
                 last_user_msg_at=now,
             )
 
+        # ---------------- Phase 4: Delivery & Async Background Tasks ----------------
         # Step 12: Deliver response through Messenger client (mark_seen, typing, bubble delay)
         await self._messenger.send_human_like_response(psid, llm_result.content)
 
         # Step 13: Schedule background tasks asynchronously
         asyncio.create_task(
             self._run_background_tasks(
-                user_id=user.id,
+                user_id=user_id,
                 user_msg_count=user_msg_count + 1,
                 last_user_msg_at=now,
             )
