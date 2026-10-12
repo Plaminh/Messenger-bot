@@ -51,7 +51,7 @@ async def record_llm_usage(
         except IntegrityError:
             await session.execute(update_stmt)
 
-    await session.commit()
+    await session.flush()
 
 
 async def get_daily_tokens(session: AsyncSession, model: str) -> int:

@@ -63,6 +63,7 @@ async def handle_command(
 
     if cmd == "/quen":
         await delete_all_user_data(session, user.id)
+        await session.commit()
         return (
             "Mình đã xóa toàn bộ ký ức, tin nhắn và dữ liệu của bạn khỏi hệ thống rồi. "
             "Nếu lúc nào bạn muốn quay lại tâm sự, mình luôn chào đón như một khởi đầu mới nhé! 🍃"

@@ -109,6 +109,7 @@ class ChatOrchestrator:
                             await read_session.rollback()
                             return
                         await add_message(read_session, user.id, "assistant", cmd_reply)
+                await read_session.commit()
                 return
 
             user_id = user.id
@@ -135,6 +136,7 @@ class ChatOrchestrator:
             # Step 9: Determine model tier via daily token budget
             downgrade = await should_downgrade_to_fast(read_session)
             tier = "fast" if downgrade else "main"
+            await read_session.commit()
 
         # ---------------- Phase 2: In-Memory Prep & LLM Call (No DB Session Held) ----------------
         # Step 3: Pronoun detection in early messages
@@ -180,25 +182,29 @@ class ChatOrchestrator:
         # ---------------- Phase 3: DB Write Session ----------------
         now = datetime.now(timezone.utc)
         async with self._session_factory() as write_session:
-            # Record token consumption
-            if llm_result.usage_tokens > 0:
-                await record_llm_usage(write_session, llm_result.model, llm_result.usage_tokens)
-
-            # Step 11: Persist messages & profile updates
             try:
+                # Record token consumption
+                if llm_result.usage_tokens > 0:
+                    await record_llm_usage(write_session, llm_result.model, llm_result.usage_tokens)
+
+                # Step 11: Persist messages & profile updates in a single atomic transaction
                 await add_message(write_session, user_id, "user", clean_text, mid=mid)
+                await add_message(write_session, user_id, "assistant", llm_result.content)
+                await update_user_profiles(
+                    write_session,
+                    user_id,
+                    style_profile=updated_style,
+                    core_profile=core_profile,
+                    last_user_msg_at=now,
+                )
+                await write_session.commit()
             except IntegrityError:
                 await write_session.rollback()
                 logger.warning("Duplicate message mid prevented by unique constraint: %s", mid)
                 return
-            await add_message(write_session, user_id, "assistant", llm_result.content)
-            await update_user_profiles(
-                write_session,
-                user_id,
-                style_profile=updated_style,
-                core_profile=core_profile,
-                last_user_msg_at=now,
-            )
+            except Exception:
+                await write_session.rollback()
+                raise
 
         # ---------------- Phase 4: Delivery & Async Background Tasks ----------------
         # Step 12: Deliver response through Messenger client (mark_seen, typing, bubble delay)

@@ -34,8 +34,7 @@ async def get_or_create_user(
         )
         session.add(user)
 
-    await session.commit()
-    await session.refresh(user)
+    await session.flush()
     return user
 
 
@@ -61,7 +60,7 @@ async def update_user_profiles(
 
     stmt = update(User).where(User.id == user_id).values(**values)
     await session.execute(stmt)
-    await session.commit()
+    await session.flush()
 
 
 async def add_message(
@@ -79,8 +78,7 @@ async def add_message(
         mid=mid,
     )
     session.add(msg)
-    await session.commit()
-    await session.refresh(msg)
+    await session.flush()
     return msg
 
 
@@ -162,8 +160,7 @@ async def upsert_summary(
         )
         session.add(summary)
 
-    await session.commit()
-    await session.refresh(summary)
+    await session.flush()
     return summary
 
 
@@ -186,8 +183,7 @@ async def add_memory(
         source_message_ids=source_message_ids or [],
     )
     session.add(mem)
-    await session.commit()
-    await session.refresh(mem)
+    await session.flush()
     return mem
 
 
@@ -212,14 +208,14 @@ async def update_memory(
         )
     )
     await session.execute(stmt)
-    await session.commit()
+    await session.flush()
 
 
 async def delete_memory(session: AsyncSession, memory_id: int) -> None:
     """Delete a memory by id."""
     stmt = delete(Memory).where(Memory.id == memory_id)
     await session.execute(stmt)
-    await session.commit()
+    await session.flush()
 
 
 async def get_all_memories(session: AsyncSession, user_id: int) -> list[Memory]:
@@ -239,5 +235,5 @@ async def delete_all_user_data(session: AsyncSession, user_id: int) -> None:
     await session.execute(delete(Memory).where(Memory.user_id == user_id))
     await session.execute(delete(Summary).where(Summary.user_id == user_id))
     await session.execute(delete(User).where(User.id == user_id))
-    await session.commit()
+    await session.flush()
     logger.info("Wiped all records for user_id=%d", user_id)

@@ -99,6 +99,7 @@ async def maybe_run_rolling_summary(
             updated_content = condensed_res.content.strip()
 
         await upsert_summary(session, user_id, updated_content, upto_message_id=new_upto_id)
+        await session.commit()
         logger.info("Updated rolling summary for user_id=%d upto_message_id=%d", user_id, new_upto_id)
         return True
 

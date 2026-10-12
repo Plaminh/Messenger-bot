@@ -169,5 +169,7 @@ async def extract_and_sync_memories(
                 await delete_memory(session, memory_id=int(mem_id))
                 logger.info("Deleted memory id=%s for user_id=%d", mem_id, user_id)
 
+        await session.commit()
+
     except Exception as exc:
         logger.error("Failed extracting memories for user_id=%d: %s", user_id, exc)
