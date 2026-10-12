@@ -57,11 +57,38 @@ class ChatOrchestrator:
         messenger_client: Optional[MessengerClient] = None,
         llm_provider: Optional[LLMProvider] = None,
         embedder: Optional[TextEmbedder] = None,
+        inactivity_delay: float = 300.0,
     ) -> None:
         self._session_factory = session_factory or get_async_session_maker()
         self._messenger = messenger_client or get_messenger_client()
         self._llm = llm_provider or GroqProvider()
         self._embedder = embedder or get_embedder()
+        self._inactivity_delay = inactivity_delay
+        self._inactivity_timers: dict[str, asyncio.Task] = {}
+
+    def _schedule_inactivity_timer(self, psid: str, user_id: int) -> None:
+        """Reset and schedule per-user inactivity timer for memory extraction."""
+        existing_timer = self._inactivity_timers.pop(psid, None)
+        if existing_timer:
+            existing_timer.cancel()
+
+        async def _inactivity_worker(uid: int, user_psid: str) -> None:
+            try:
+                await asyncio.sleep(self._inactivity_delay)
+            except asyncio.CancelledError:
+                return
+
+            self._inactivity_timers.pop(user_psid, None)
+            try:
+                async with self._session_factory() as session:
+                    await extract_and_sync_memories(session, uid, self._llm, self._embedder)
+            except Exception as exc:
+                logger.error("Error executing inactivity extraction for user_id=%d: %s", uid, exc)
+
+        self._inactivity_timers[psid] = create_background_task(
+            _inactivity_worker(user_id, psid),
+            name=f"inactivity_extractor_{psid}",
+        )
 
     async def _run_background_tasks(
         self,
@@ -86,6 +113,11 @@ class ChatOrchestrator:
         clean_text = text.strip()
         if not clean_text:
             return
+
+        # Cancel any pending inactivity timer for this user immediately upon new activity
+        pending_timer = self._inactivity_timers.pop(psid, None)
+        if pending_timer:
+            pending_timer.cancel()
 
         # ---------------- Phase 1: DB Read Session ----------------
         async with self._session_factory() as read_session:
@@ -220,6 +252,7 @@ class ChatOrchestrator:
             ),
             name=f"bg_tasks_user_{user_id}",
         )
+        self._schedule_inactivity_timer(psid, user_id)
 
 
 # Global orchestrator singleton
