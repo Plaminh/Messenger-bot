@@ -17,8 +17,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan managing startup and graceful shutdown."""
     configure_logging()
     logger.info("Initializing Messenger Friend Bot...")
+    from app.api.webhook import set_turn_handler
+    from app.chat.orchestrator import get_orchestrator
+    set_turn_handler(get_orchestrator().handle_turn)
     yield
     logger.info("Shutting down Messenger Friend Bot...")
+    set_turn_handler(None)
     client = get_messenger_client()
     await client.aclose()
     set_messenger_client(None)
