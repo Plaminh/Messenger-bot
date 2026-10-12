@@ -18,6 +18,8 @@ os.environ["DAILY_TOKEN_BUDGET_MAIN"] = "100000"
 os.environ["DAILY_TOKEN_BUDGET_FAST"] = "500000"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["EMBEDDING_MODEL"] = "intfloat/multilingual-e5-small"
+os.environ["EMBEDDING_PRELOAD"] = "false"
+os.environ["EMBEDDING_ALLOW_DUMMY"] = "true"
 os.environ["LOG_LEVEL"] = "DEBUG"
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine

@@ -119,10 +119,11 @@ async def test_webhook_post_non_text_attachment():
         hashlib.sha256,
     ).hexdigest()
 
-    with patch("app.api.webhook.get_messenger_client") as mock_client_factory:
-        mock_client = AsyncMock()
-        mock_client_factory.return_value = mock_client
+    from app.api.dependencies import get_messenger_client
 
+    mock_client = AsyncMock()
+    app.dependency_overrides[get_messenger_client] = lambda: mock_client
+    try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
@@ -134,3 +135,5 @@ async def test_webhook_post_non_text_attachment():
 
         # Background task runs
         mock_client.send_human_like_response.assert_awaited()
+    finally:
+        app.dependency_overrides.pop(get_messenger_client, None)

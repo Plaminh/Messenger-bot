@@ -23,18 +23,12 @@ from app.main import app, lifespan
 
 @pytest.mark.asyncio
 async def test_app_state_contains_required_components():
-    """Verify app.state holds all core singleton components without globals."""
-    assert hasattr(app.state, "orchestrator")
-    assert isinstance(app.state.orchestrator, ChatOrchestrator)
-
-    assert hasattr(app.state, "debouncer")
-    assert isinstance(app.state.debouncer, MessageDebouncer)
-
-    assert hasattr(app.state, "deduplicator")
-    assert isinstance(app.state.deduplicator, MessageDeduplicator)
-
-    assert hasattr(app.state, "messenger_client")
-    assert isinstance(app.state.messenger_client, MessengerClient)
+    """Verify lifespan populates app.state with all core components (built once, not at import)."""
+    async with lifespan(app):
+        assert isinstance(app.state.orchestrator, ChatOrchestrator)
+        assert isinstance(app.state.debouncer, MessageDebouncer)
+        assert isinstance(app.state.deduplicator, MessageDeduplicator)
+        assert isinstance(app.state.messenger_client, MessengerClient)
 
 
 @pytest.mark.asyncio

@@ -78,8 +78,12 @@ async def test_turn_writes_rollback_atomically_on_failure(
 
     # Simulate an error during profile update (the 3rd write in the transaction)
     with patch("app.chat.orchestrator.update_user_profiles", side_effect=RuntimeError("Simulated DB error")):
-        with pytest.raises(RuntimeError, match="Simulated DB error"):
-            await orchestrator.handle_turn(psid, "Tin nhắn thử lỗi")
+        # handle_turn swallows the error and apologises to the user instead of staying silent
+        await orchestrator.handle_turn(psid, "Tin nhắn thử lỗi")
+
+    mock_messenger.send_human_like_response.assert_awaited_once()
+    assert mock_messenger.send_human_like_response.await_args.args[0] == psid
+    assert mock_messenger.send_human_like_response.await_args.args[1] != mock_llm.generate.return_value.content
 
     # In a new session, verify that neither user message nor assistant message was persisted
     async with session_factory() as verify_session:
