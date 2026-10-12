@@ -1,7 +1,7 @@
 """Token budget estimation and conversational window management."""
 
 from typing import Sequence
-from app.memory.models import Message
+from app.db.models import Message
 
 
 def estimate_tokens(text: str) -> int:

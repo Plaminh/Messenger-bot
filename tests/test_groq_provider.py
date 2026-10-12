@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from groq import RateLimitError
 
-from app.llm.groq_provider import FRIENDLY_FALLBACK_TEXT, GroqProvider
+from app.integrations.llm.groq_provider import FRIENDLY_FALLBACK_TEXT, GroqProvider
 
 
 @pytest.mark.asyncio

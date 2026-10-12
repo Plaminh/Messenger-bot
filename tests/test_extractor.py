@@ -5,13 +5,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.llm.base import LLMResult
+from app.db.models import Memory, Message, User
+from app.db.store import get_all_memories
+from app.integrations.llm.base import LLMResult
 from app.memory.extractor import (
     extract_and_sync_memories,
     should_trigger_extraction,
 )
-from app.memory.models import Memory, Message, User
-from app.memory.store import get_all_memories
 
 
 def test_should_trigger_extraction():

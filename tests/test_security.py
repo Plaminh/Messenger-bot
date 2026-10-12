@@ -2,7 +2,7 @@
 
 import hashlib
 import hmac
-from app.messenger.security import verify_meta_signature
+from app.integrations.messenger.security import verify_meta_signature
 
 
 def test_verify_signature_valid():

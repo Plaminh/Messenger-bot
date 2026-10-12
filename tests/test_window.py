@@ -1,6 +1,6 @@
 """Tests for message token estimation and conversational windowing."""
 
-from app.memory.models import Message
+from app.db.models import Message
 from app.memory.window import build_recent_window, estimate_tokens
 
 

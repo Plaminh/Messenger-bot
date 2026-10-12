@@ -7,8 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.chat.orchestrator import ChatOrchestrator
-from app.memory.models import Message, User
-from app.memory.store import get_or_create_user
+from app.db.models import Message, User
+from app.db.store import get_or_create_user
 
 
 @pytest.mark.asyncio

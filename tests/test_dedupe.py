@@ -1,6 +1,6 @@
 """Tests for message deduplication."""
 
-from app.messenger.dedupe import MessageDeduplicator
+from app.integrations.messenger.dedupe import MessageDeduplicator
 
 
 def test_deduplicator_basic():

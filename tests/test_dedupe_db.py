@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.chat.debounce import MessageDebouncer
 from app.chat.orchestrator import ChatOrchestrator
-from app.memory.models import Message
+from app.db.models import Message
 
 
 @pytest.mark.asyncio

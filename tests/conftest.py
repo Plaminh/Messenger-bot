@@ -23,7 +23,7 @@ os.environ["LOG_LEVEL"] = "DEBUG"
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from app.core.db import Base
 from app.core.settings import get_settings
-from app.llm.base import LLMResult
+from app.integrations.llm.base import LLMResult
 
 
 @pytest_asyncio.fixture

@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.chat.orchestrator import ChatOrchestrator
-from app.llm.base import LLMResult
+from app.integrations.llm.base import LLMResult
 
 
 @pytest.mark.asyncio

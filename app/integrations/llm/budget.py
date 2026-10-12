@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.settings import get_settings
-from app.memory.models import LLMUsage
+from app.db.models import LLMUsage
 
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 

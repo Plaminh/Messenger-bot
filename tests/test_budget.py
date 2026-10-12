@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.settings import get_settings
-from app.llm.budget import (
+from app.integrations.llm.budget import (
     get_daily_tokens,
     record_llm_usage,
     should_downgrade_to_fast,

@@ -7,9 +7,9 @@ when unsummarized message count exceeds 30. Always runs in background using tier
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.llm.base import LLMProvider
-from app.llm.budget import record_llm_usage
-from app.memory.store import get_summary, get_unsummarized_messages, upsert_summary
+from app.db.store import get_summary, get_unsummarized_messages, upsert_summary
+from app.integrations.llm.base import LLMProvider
+from app.integrations.llm.budget import record_llm_usage
 from app.memory.window import estimate_tokens
 
 logger = get_logger(__name__)

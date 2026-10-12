@@ -5,8 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.commands import handle_command, is_command
-from app.memory.models import Memory, Message, Summary, User
-from app.memory.store import add_memory, add_message, upsert_summary
+from app.db.models import Memory, Message, Summary, User
+from app.db.store import add_memory, add_message, upsert_summary
 
 
 def test_is_command_prefix_exact():

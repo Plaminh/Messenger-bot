@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.memory.models import Memory, User
+from app.db.models import Memory, User
 from app.memory.retriever import compute_python_cosine, retrieve_relevant_memories
 
 

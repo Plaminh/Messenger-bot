@@ -13,7 +13,7 @@ from groq import AsyncGroq, APIStatusError, RateLimitError, APITimeoutError
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.llm.base import LLMProvider, LLMResult
+from app.integrations.llm.base import LLMProvider, LLMResult
 
 logger = get_logger(__name__)
 

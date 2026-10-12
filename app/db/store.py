@@ -6,7 +6,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.memory.models import Memory, Message, Summary, User
+from app.db.models import Memory, Message, Summary, User
 
 logger = get_logger(__name__)
 

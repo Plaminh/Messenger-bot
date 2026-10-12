@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from app.core.settings import get_settings
 from app.core.db import Base
-import app.memory.models  # register all models
+import app.db.models  # register all models
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

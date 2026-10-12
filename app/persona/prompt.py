@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Any, List, Optional
 from zoneinfo import ZoneInfo
 
-from app.memory.models import Memory, Message
+from app.db.models import Memory, Message
 from app.persona.safety import get_crisis_prompt_guidance
 from app.persona.style import render_style_guidance
 

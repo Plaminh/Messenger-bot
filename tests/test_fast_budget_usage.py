@@ -7,10 +7,10 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.llm.base import LLMResult
-from app.llm.budget import get_daily_tokens, record_llm_usage
+from app.db.models import LLMUsage, Message, User
+from app.integrations.llm.base import LLMResult
+from app.integrations.llm.budget import get_daily_tokens, record_llm_usage
 from app.memory.extractor import extract_and_sync_memories
-from app.memory.models import LLMUsage, Message, User
 from app.memory.summarizer import maybe_run_rolling_summary
 
 

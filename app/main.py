@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from app.core.logging import configure_logging, get_logger
 from app.api.health import router as health_router
 from app.api.webhook import router as webhook_router
-from app.messenger.client import get_messenger_client, set_messenger_client
+from app.integrations.messenger.client import get_messenger_client, set_messenger_client
 
 logger = get_logger(__name__)
 

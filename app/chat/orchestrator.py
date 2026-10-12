@@ -23,13 +23,7 @@ from app.core.db import get_async_session_maker
 from app.core.logging import get_logger
 from app.core.tasks import create_background_task
 from app.chat.commands import handle_command, is_command
-from app.llm.base import LLMProvider
-from app.llm.budget import record_llm_usage, should_downgrade_to_fast
-from app.llm.groq_provider import GroqProvider
-from app.memory.embedder import TextEmbedder, get_embedder
-from app.memory.extractor import extract_and_sync_memories, should_trigger_extraction
-from app.memory.retriever import retrieve_relevant_memories
-from app.memory.store import (
+from app.db.store import (
     add_message,
     get_or_create_user,
     get_recent_messages,
@@ -38,9 +32,15 @@ from app.memory.store import (
     is_message_mid_exists,
     update_user_profiles,
 )
+from app.integrations.embedder import TextEmbedder, get_embedder
+from app.integrations.llm.base import LLMProvider
+from app.integrations.llm.budget import record_llm_usage, should_downgrade_to_fast
+from app.integrations.llm.groq_provider import GroqProvider
+from app.integrations.messenger.client import MessengerClient, get_messenger_client
+from app.memory.extractor import extract_and_sync_memories, should_trigger_extraction
+from app.memory.retriever import retrieve_relevant_memories
 from app.memory.summarizer import maybe_run_rolling_summary
 from app.memory.window import build_recent_window
-from app.messenger.client import MessengerClient, get_messenger_client
 from app.persona.prompt import assemble_system_prompt, build_chat_messages
 from app.persona.safety import is_crisis
 from app.persona.style import detect_pronouns, update_style_profile

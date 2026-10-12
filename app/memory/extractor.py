@@ -10,16 +10,16 @@ from typing import Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.llm.base import LLMProvider
-from app.llm.budget import record_llm_usage
-from app.memory.embedder import TextEmbedder, get_embedder
-from app.memory.retriever import retrieve_relevant_memories
-from app.memory.store import (
+from app.db.store import (
     add_memory,
     delete_memory,
     get_recent_messages,
     update_memory,
 )
+from app.integrations.embedder import TextEmbedder, get_embedder
+from app.integrations.llm.base import LLMProvider
+from app.integrations.llm.budget import record_llm_usage
+from app.memory.retriever import retrieve_relevant_memories
 
 logger = get_logger(__name__)
 

@@ -12,9 +12,9 @@ from fastapi.responses import PlainTextResponse
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.messenger.client import get_messenger_client
-from app.messenger.dedupe import deduplicator
-from app.messenger.security import verify_meta_signature
+from app.integrations.messenger.client import get_messenger_client
+from app.integrations.messenger.dedupe import deduplicator
+from app.integrations.messenger.security import verify_meta_signature
 from app.chat.debounce import debouncer
 
 logger = get_logger(__name__)

@@ -7,8 +7,8 @@ without passing them to the LLM.
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.memory.models import User
-from app.memory.store import delete_all_user_data, get_all_memories
+from app.db.models import User
+from app.db.store import delete_all_user_data, get_all_memories
 
 
 def is_command(text: str) -> bool:
