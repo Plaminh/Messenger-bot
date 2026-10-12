@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.llm.base import LLMProvider
+from app.llm.budget import record_llm_usage
 from app.memory.store import get_summary, get_unsummarized_messages, upsert_summary
 from app.memory.window import estimate_tokens
 
@@ -74,6 +75,8 @@ async def maybe_run_rolling_summary(
             max_tokens=MAX_SUMMARY_TOKENS,
             temperature=0.3,
         )
+        if res.usage_tokens > 0:
+            await record_llm_usage(session, res.model, res.usage_tokens)
         updated_content = res.content.strip()
 
         # Condense if too long
@@ -91,6 +94,8 @@ async def maybe_run_rolling_summary(
                 max_tokens=MAX_SUMMARY_TOKENS,
                 temperature=0.3,
             )
+            if condensed_res.usage_tokens > 0:
+                await record_llm_usage(session, condensed_res.model, condensed_res.usage_tokens)
             updated_content = condensed_res.content.strip()
 
         await upsert_summary(session, user_id, updated_content, upto_message_id=new_upto_id)

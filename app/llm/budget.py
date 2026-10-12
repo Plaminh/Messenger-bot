@@ -2,7 +2,8 @@
 
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.settings import get_settings
@@ -22,26 +23,33 @@ async def record_llm_usage(
     tokens: int,
     requests: int = 1,
 ) -> None:
-    """Increment token and request counters for specified model on current date."""
+    """Increment token and request counters atomically for specified model on current date."""
     today = get_current_vn_date()
-    stmt = select(LLMUsage).where(
-        LLMUsage.day == today,
-        LLMUsage.model == model,
-    )
-    result = await session.execute(stmt)
-    usage = result.scalar_one_or_none()
-
-    if usage:
-        usage.tokens += tokens
-        usage.requests += requests
-    else:
-        usage = LLMUsage(
-            day=today,
-            model=model,
-            tokens=tokens,
-            requests=requests,
+    update_stmt = (
+        update(LLMUsage)
+        .where(
+            LLMUsage.day == today,
+            LLMUsage.model == model,
         )
-        session.add(usage)
+        .values(
+            tokens=LLMUsage.tokens + tokens,
+            requests=LLMUsage.requests + requests,
+        )
+    )
+    result = await session.execute(update_stmt)
+    if result.rowcount == 0:
+        try:
+            async with session.begin_nested():
+                usage = LLMUsage(
+                    day=today,
+                    model=model,
+                    tokens=tokens,
+                    requests=requests,
+                )
+                session.add(usage)
+                await session.flush()
+        except IntegrityError:
+            await session.execute(update_stmt)
 
     await session.commit()
 

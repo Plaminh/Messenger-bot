@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.llm.base import LLMProvider
+from app.llm.budget import record_llm_usage
 from app.memory.embedder import TextEmbedder, get_embedder
 from app.memory.retriever import retrieve_relevant_memories
 from app.memory.store import (
@@ -115,6 +116,8 @@ async def extract_and_sync_memories(
             max_tokens=500,
             temperature=0.2,
         )
+        if res.usage_tokens > 0:
+            await record_llm_usage(session, res.model, res.usage_tokens)
 
         data = json.loads(res.content)
         ops = []
