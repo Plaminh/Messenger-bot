@@ -10,6 +10,7 @@ import inspect
 from collections.abc import Callable, Coroutine
 from typing import Any, Optional
 from app.core.logging import get_logger
+from app.core.tasks import create_background_task
 
 logger = get_logger(__name__)
 
@@ -47,9 +48,10 @@ class MessageDebouncer:
         if psid in self._timers:
             self._timers[psid].cancel()
 
-        # Start new countdown timer
-        self._timers[psid] = asyncio.create_task(
-            self._debounce_worker(psid, callback)
+        # Start new countdown timer tracked with strong reference
+        self._timers[psid] = create_background_task(
+            self._debounce_worker(psid, callback),
+            name=f"debounce_{psid}",
         )
 
     async def _debounce_worker(
@@ -69,6 +71,8 @@ class MessageDebouncer:
         self._timers.pop(psid, None)
 
         if not items:
+            if psid not in self._buffers and psid not in self._timers:
+                self._user_locks.pop(psid, None)
             return
 
         texts = [item[0] for item in items]
@@ -90,6 +94,10 @@ class MessageDebouncer:
                     await callback(psid, combined_text)
             except Exception as exc:
                 logger.error("Error executing callback for psid %s: %s", psid, exc, exc_info=True)
+            finally:
+                # Cleanup per-user lock if no new messages queued or timers running
+                if psid not in self._buffers and psid not in self._timers:
+                    self._user_locks.pop(psid, None)
 
 
 # Default global debouncer instance

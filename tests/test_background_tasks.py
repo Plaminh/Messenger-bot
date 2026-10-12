@@ -21,8 +21,9 @@ async def test_create_background_task_retains_reference_and_cleans_up():
     # While task is running, it must be retained in active tasks set
     assert task in get_active_tasks()
 
-    # Wait for completion
-    await asyncio.sleep(0.06)
+    # Wait for completion and loop turn to process done callback
+    await task
+    await asyncio.sleep(0.01)
 
     assert completed is True
     # Once done, it must be automatically discarded via done callback
@@ -37,7 +38,11 @@ async def test_background_task_logs_unhandled_exception(caplog):
 
     with caplog.at_level(logging.ERROR):
         task = create_background_task(failing_coro(), name="failing_task")
-        await asyncio.sleep(0.04)
+        try:
+            await task
+        except ValueError:
+            pass
+        await asyncio.sleep(0.01)
 
     assert task not in get_active_tasks()
     assert "Simulated background error" in caplog.text
