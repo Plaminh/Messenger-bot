@@ -7,6 +7,7 @@ and token budget recording.
 
 import asyncio
 import json
+import math
 import random
 from typing import Any, Optional
 from groq import AsyncGroq, APIStatusError, RateLimitError, APITimeoutError
@@ -18,6 +19,9 @@ from app.integrations.llm.base import LLMProvider, LLMResult
 logger = get_logger(__name__)
 
 FRIENDLY_FALLBACK_TEXT = "mình hơi đơ xíu, lát nói tiếp nhé 🥺"
+
+# Never block a user turn longer than this on a single 429; give up and fall back instead
+MAX_RETRY_AFTER_SECONDS = 8.0
 
 
 class GroqProvider(LLMProvider):
@@ -87,13 +91,27 @@ class GroqProvider(LLMProvider):
                 if hasattr(exc, "response") and exc.response:
                     retry_after_header = exc.response.headers.get("retry-after")
 
+                backoff_seconds = (2**attempt) + random.uniform(0.1, 0.5)
+                wait_seconds = backoff_seconds
                 if retry_after_header:
                     try:
                         wait_seconds = float(retry_after_header)
                     except ValueError:
-                        wait_seconds = (2**attempt) + random.uniform(0.1, 0.5)
-                else:
-                    wait_seconds = (2**attempt) + random.uniform(0.1, 0.5)
+                        wait_seconds = backoff_seconds
+                if not math.isfinite(wait_seconds) or wait_seconds < 0:
+                    wait_seconds = backoff_seconds
+
+                if wait_seconds > MAX_RETRY_AFTER_SECONDS:
+                    logger.warning(
+                        "Rate limit (429) on %s with retry-after %.0fs exceeds cap %.0fs; giving up",
+                        model_name,
+                        wait_seconds,
+                        MAX_RETRY_AFTER_SECONDS,
+                    )
+                    raise exc
+
+                if attempt + 1 >= max_retries:
+                    break  # no point sleeping after the last attempt
 
                 logger.warning(
                     "Rate limit (429) on %s. Attempt %d/%d, retrying in %.2fs",
@@ -109,6 +127,8 @@ class GroqProvider(LLMProvider):
                 status_code = getattr(exc, "status_code", 500)
                 # Retry on 5xx server errors
                 if status_code >= 500 or isinstance(exc, APITimeoutError):
+                    if attempt + 1 >= max_retries:
+                        break  # no point sleeping after the last attempt
                     wait_seconds = (2**attempt) + random.uniform(0.1, 0.5)
                     logger.warning(
                         "Groq error %s on %s. Attempt %d/%d, retrying in %.2fs",

@@ -5,6 +5,7 @@ using asyncio.to_thread. Applies 'query: ' and 'passage: ' prefixes per model de
 """
 
 import asyncio
+import zlib
 from typing import Any, List, Optional
 import numpy as np
 
@@ -16,13 +17,27 @@ logger = get_logger(__name__)
 EMBEDDING_DIM = 384
 
 
+class EmbedderUnavailableError(RuntimeError):
+    """Raised when the embedding model cannot be loaded and dummy vectors are not allowed."""
+
+
 class TextEmbedder:
     """Manages sentence-transformers embedding generation."""
 
-    def __init__(self, model_name: Optional[str] = None) -> None:
+    def __init__(self, model_name: Optional[str] = None, allow_dummy: Optional[bool] = None) -> None:
         self.model_name = model_name
+        # None => read EMBEDDING_ALLOW_DUMMY from settings (default False)
+        self._allow_dummy = allow_dummy
         self._model: Any = None
         self._lock = asyncio.Lock()
+
+    def _dummy_allowed(self) -> bool:
+        if self._allow_dummy is not None:
+            return self._allow_dummy
+        try:
+            return bool(get_settings().EMBEDDING_ALLOW_DUMMY)
+        except Exception:
+            return False
 
     def _load_model(self) -> Any:
         """Synchronously load model into memory."""
@@ -42,21 +57,30 @@ class TextEmbedder:
             from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer(model_to_load, device="cpu")
         except Exception as exc:
+            if not self._dummy_allowed():
+                logger.error("Could not load embedding model %s: %s", model_to_load, exc)
+                raise EmbedderUnavailableError(
+                    f"Cannot load embedding model '{model_to_load}': {exc}"
+                ) from exc
             logger.warning(
-                "Could not load sentence_transformers (%s). Embedding will use dummy fallback if unmocked.",
+                "Could not load sentence_transformers (%s). Using dummy vectors (EMBEDDING_ALLOW_DUMMY=true).",
                 exc,
             )
             self._model = None
         return self._model
 
+    async def preload(self) -> None:
+        """Load the model off the event loop (call at startup to fail fast)."""
+        await asyncio.to_thread(self._load_model)
+
     def _sync_encode(self, texts: list[str]) -> list[list[float]]:
         """Synchronous CPU worker to encode text into normalized vectors."""
         model = self._load_model()
         if model is None:
-            # Fallback deterministic normalized vector for offline/unit tests
-            rng = np.random.default_rng(seed=42)
+            # Deterministic, text-dependent vectors for offline/unit tests only
             results = []
-            for _ in texts:
+            for text in texts:
+                rng = np.random.default_rng(seed=zlib.crc32(text.encode("utf-8")))
                 vec = rng.standard_normal(EMBEDDING_DIM)
                 norm = np.linalg.norm(vec)
                 results.append((vec / norm).tolist())
