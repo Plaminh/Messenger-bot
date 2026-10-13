@@ -12,7 +12,7 @@ Assembles the system and conversational context in strict order:
 """
 
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from app.db.models import Memory, Message

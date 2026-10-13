@@ -6,7 +6,6 @@ from fastapi import FastAPI
 
 from app.core.logging import configure_logging, get_logger
 from app.core.db import get_async_engine
-from app.core.settings import get_settings
 from app.core.tasks import cancel_background_tasks
 from app.api.health import router as health_router
 from app.api.webhook import router as webhook_router

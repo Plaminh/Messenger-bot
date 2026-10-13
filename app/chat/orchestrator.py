@@ -14,6 +14,7 @@ Coordinates full conversational turn execution in strict order:
 """
 
 import asyncio
+import weakref
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -36,7 +37,7 @@ from app.db.store import (
 from app.integrations.llm.base import LLMProvider, LLMResult
 from app.integrations.llm.budget import record_llm_usage, should_downgrade_to_fast
 from app.integrations.llm.groq_provider import GroqProvider
-from app.integrations.messenger.client import MessengerClient, get_messenger_client
+from app.integrations.messenger.client import MessengerClient
 from app.memory.extractor import extract_and_sync_memories, should_trigger_extraction
 from app.memory.retriever import retrieve_relevant_memories
 from app.memory.summarizer import maybe_run_rolling_summary
@@ -74,17 +75,20 @@ class ChatOrchestrator:
 
     def __init__(
         self,
+        *,
+        messenger_client: MessengerClient,
         session_factory: Optional[async_sessionmaker[AsyncSession]] = None,
-        messenger_client: Optional[MessengerClient] = None,
         llm_provider: Optional[LLMProvider] = None,
         inactivity_delay: float = 300.0,
     ) -> None:
         self._session_factory = session_factory or get_async_session_maker()
-        self._messenger = messenger_client or get_messenger_client()
+        self._messenger = messenger_client
         self._llm = llm_provider or GroqProvider()
         self._inactivity_delay = inactivity_delay
         self._inactivity_timers: dict[str, asyncio.Task] = {}
-        self._extraction_locks: dict[int, asyncio.Lock] = {}
+        self._extraction_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
 
     async def _extract_memories(self, user_id: int) -> None:
         """Run memory extraction with a fresh session, never concurrently for one user."""

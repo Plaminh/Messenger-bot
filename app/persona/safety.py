@@ -6,7 +6,6 @@ Also ensures toxic profanity or hate speech is never mirrored.
 """
 
 import re
-from typing import Optional
 
 # Comprehensive crisis indicators (suicide, self-harm, deep despair)
 CRISIS_PATTERNS = [

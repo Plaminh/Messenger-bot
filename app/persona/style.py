@@ -16,22 +16,6 @@ PRONOUN_PATTERNS = [
     (r"\b(anh|em)\b", "anh", "em"),
 ]
 
-# Vietnamese abbreviations
-ABBREV_PATTERN = re.compile(
-    r"\b(ko|k|hok|dc|đc|bt|j|sao|ng|mn|thui|thôi|nè|m|t|mik|uk|uhm|h|bh)\b",
-    re.IGNORECASE,
-)
-
-# Common laughter expressions
-LAUGH_PATTERNS = [
-    (re.compile(r"\bhaha+\b", re.IGNORECASE), "haha"),
-    (re.compile(r"\bhihi+\b", re.IGNORECASE), "hihi"),
-    (re.compile(r"\bhuhu+\b", re.IGNORECASE), "huhu"),
-    (re.compile(r"\bkkk+\b", re.IGNORECASE), "kkk"),
-    (re.compile(r"=[\)\(]+"), "=))"),
-    (re.compile(r"\^_\^"), "^_^"),
-]
-
 # Emoji regex heuristic
 EMOJI_PATTERN = re.compile(
     "[\U00010000-\U0010ffff\u2600-\u26ff\u2700-\u27bf\U0001f300-\U0001f5ff\U0001f600-\U0001f64f\U0001f680-\U0001f6ff]",
@@ -50,23 +34,10 @@ def extract_message_features(text: str) -> dict[str, Any]:
     emoji_count = len(emojis)
     emoji_ratio = emoji_count / max(1, word_count)
 
-    abbrev_count = len(ABBREV_PATTERN.findall(clean_text))
-    abbrev_ratio = abbrev_count / max(1, word_count)
-    alpha_chars = [c for c in clean_text if c.isalpha()]
-    lower_chars = [c for c in alpha_chars if c.islower()]
-    lowercase_ratio = len(lower_chars) / max(1, len(alpha_chars))
-    detected_laugh = next((label for pattern, label in LAUGH_PATTERNS if pattern.search(clean_text)), None)
-
     return {
         "word_count": word_count,
         "emoji_count": emoji_count,
         "emoji_ratio": emoji_ratio,
-        "abbrev_ratio": abbrev_ratio,
-        "lowercase_ratio": lowercase_ratio,
-        "has_ellipsis": "..." in clean_text,
-        "has_multi_exclamation": bool(re.search(r"!{2,}", clean_text)),
-        "has_no_end_period": not clean_text.endswith((".", "!", "?")),
-        "detected_laugh": detected_laugh,
     }
 
 
@@ -120,25 +91,16 @@ def render_style_guidance(
     target_words = max(10, min(60, avg_words))
 
     emoji_ratio = style_profile.get("avg_emoji_ratio", 0.05)
-    lower_ratio = style_profile.get("avg_lowercase_ratio", 0.9)
 
     guidelines = []
     # Length mirroring
     guidelines.append(f"- Độ dài trả lời: câu ngắn gọn, tương đương khoảng {target_words} - {target_words + 15} từ, không dông dài.")
-
-    if lower_ratio > 0.8:
-        guidelines.append("- Ưa chuộng viết thường tự nhiên, ít trang trọng.")
 
     # Emoji guidance
     if emoji_ratio < 0.03:
         guidelines.append("- Hạn chế emoji (dùng tối đa 1 emoji hoặc không dùng).")
     else:
         guidelines.append("- Dùng emoji nhẹ nhàng, ấm áp, phù hợp cảm xúc (1-2 cái).")
-
-    laughs = style_profile.get("laugh_styles", {})
-    if laughs:
-        fav_laugh = max(laughs.items(), key=lambda item: item[1])[0]
-        guidelines.append(f"- Nếu có đùa vui, dùng kiểu cười quen thuộc: '{fav_laugh}'.")
 
     # Recent voice sample
     samples = [m.strip() for m in recent_user_messages if m.strip()][-3:]

@@ -1,7 +1,7 @@
 """Base protocol and data contracts for LLM providers."""
 
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 
 @dataclass

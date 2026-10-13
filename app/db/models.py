@@ -1,7 +1,5 @@
 """SQLAlchemy models for Messenger Friend Bot."""
 
-from datetime import datetime, date
-from typing import Optional, List, Dict, Any
 from sqlalchemy import (
     Column,
     Integer,

@@ -1,7 +1,7 @@
 """Storage layer providing CRUD for users, messages, memories, and summaries."""
 
 from datetime import datetime
-from typing import Any, Optional, Sequence
+from typing import Any, Optional
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +14,6 @@ logger = get_logger(__name__)
 async def get_or_create_user(
     session: AsyncSession,
     fb_psid: str,
-    display_name: Optional[str] = None,
 ) -> User:
     """Retrieve existing user by fb_psid or create a new user profile."""
     stmt = select(User).where(User.fb_psid == fb_psid)
@@ -23,12 +22,9 @@ async def get_or_create_user(
 
     if user:
         user.last_seen_at = func.now()
-        if display_name and not user.display_name:
-            user.display_name = display_name
     else:
         user = User(
             fb_psid=fb_psid,
-            display_name=display_name,
             style_profile={},
             core_profile={},
         )

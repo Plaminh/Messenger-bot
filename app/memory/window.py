@@ -22,15 +22,6 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text.strip()) // 3)
 
 
-def estimate_messages_tokens(messages: Sequence[dict[str, str]]) -> int:
-    """Calculate aggregate tokens across formatted message dictionaries."""
-    total = 0
-    for msg in messages:
-        # 4 overhead tokens for role/formatting + content tokens
-        total += 4 + estimate_tokens(msg.get("content", ""))
-    return total
-
-
 def build_recent_window(
     messages: Sequence[Message],
     token_budget: int = 850,

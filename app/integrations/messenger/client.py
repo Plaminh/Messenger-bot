@@ -154,21 +154,3 @@ class MessengerClient:
             if not await self.send_text(recipient_psid, bubble):
                 raise DeliveryError(sent_bubbles, len(bubbles))
             sent_bubbles += 1
-
-
-# Module-level singleton factory
-_messenger_client: Optional[MessengerClient] = None
-
-
-def get_messenger_client() -> MessengerClient:
-    """Retrieve shared MessengerClient instance."""
-    global _messenger_client
-    if _messenger_client is None:
-        _messenger_client = MessengerClient()
-    return _messenger_client
-
-
-def set_messenger_client(client: Optional[MessengerClient]) -> None:
-    """Allow injecting custom client for testing or teardown."""
-    global _messenger_client
-    _messenger_client = client

@@ -6,7 +6,6 @@ Assumes single-worker deployment.
 """
 
 import asyncio
-import inspect
 from collections.abc import Callable, Coroutine
 from typing import Any, Optional
 from app.core.logging import get_logger
@@ -99,13 +98,7 @@ class MessageDebouncer:
             # Process sequentially for this user
             async with lock:
                 try:
-                    sig = inspect.signature(callback)
-                    if "mid" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-                        await callback(psid, combined_text, mid=last_mid)
-                    elif len(sig.parameters) >= 3:
-                        await callback(psid, combined_text, last_mid)
-                    else:
-                        await callback(psid, combined_text)
+                    await callback(psid, combined_text, mid=last_mid)
                 except Exception as exc:
                     logger.error("Error executing callback for psid %s: %s", psid, exc, exc_info=True)
         finally:
