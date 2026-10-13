@@ -6,14 +6,28 @@ Assumes single-worker deployment.
 """
 
 import asyncio
-from collections.abc import Callable, Coroutine
-from typing import Any, Optional
+from collections.abc import Coroutine
+from typing import Optional, Protocol
 from app.core.logging import get_logger
 from app.core.tasks import create_background_task
 
 logger = get_logger(__name__)
 
 DEFAULT_DEBOUNCE_DELAY = 2.5
+SourceMessage = tuple[str, Optional[str]]
+
+
+class DebounceCallback(Protocol):
+    """Callback contract for one ordered batch of Messenger messages."""
+
+    def __call__(
+        self,
+        psid: str,
+        combined_text: str,
+        *,
+        mid: Optional[str],
+        source_messages: list[SourceMessage],
+    ) -> Coroutine[None, None, None]: ...
 
 
 class MessageDebouncer:
@@ -21,7 +35,7 @@ class MessageDebouncer:
 
     def __init__(self, delay: float = DEFAULT_DEBOUNCE_DELAY) -> None:
         self.delay = delay
-        self._buffers: dict[str, list[tuple[str, Optional[str]]]] = {}
+        self._buffers: dict[str, list[SourceMessage]] = {}
         self._timers: dict[str, asyncio.Task] = {}
         self._user_locks: dict[str, asyncio.Lock] = {}
         # Number of turns that hold or are waiting for the user's lock
@@ -45,7 +59,7 @@ class MessageDebouncer:
         self,
         psid: str,
         text: str,
-        callback: Callable[..., Coroutine[Any, Any, None]],
+        callback: DebounceCallback,
         mid: Optional[str] = None,
     ) -> None:
         """Enqueue message for debouncing and reset user's timer."""
@@ -66,7 +80,7 @@ class MessageDebouncer:
     async def _debounce_worker(
         self,
         psid: str,
-        callback: Callable[..., Coroutine[Any, Any, None]],
+        callback: DebounceCallback,
     ) -> None:
         """Wait for delay window to lapse without interruption, then trigger callback."""
         try:
@@ -98,7 +112,7 @@ class MessageDebouncer:
             # Process sequentially for this user
             async with lock:
                 try:
-                    await callback(psid, combined_text, mid=last_mid)
+                    await callback(psid, combined_text, mid=last_mid, source_messages=items)
                 except Exception as exc:
                     logger.error("Error executing callback for psid %s: %s", psid, exc, exc_info=True)
         finally:

@@ -17,7 +17,7 @@ from app.api.dependencies import (
     get_messenger_client,
     get_orchestrator,
 )
-from app.chat.debounce import MessageDebouncer
+from app.chat.debounce import MessageDebouncer, SourceMessage
 from app.chat.orchestrator import ChatOrchestrator
 from app.integrations.messenger.client import MessengerClient
 from app.integrations.messenger.dedupe import MessageDeduplicator
@@ -89,8 +89,18 @@ async def handle_messaging_event(
         if not text:
             return
 
-        async def _run_orchestrator(psid: str, combined: str, mid: str | None = None) -> None:
-            await orchestrator.handle_turn(psid, combined, mid=mid)
+        async def _run_orchestrator(
+            psid: str,
+            combined: str,
+            mid: str | None,
+            source_messages: list[SourceMessage],
+        ) -> None:
+            await orchestrator.handle_turn(
+                psid,
+                combined,
+                mid=mid,
+                source_messages=source_messages,
+            )
 
         await debouncer.add_message(sender_id, text, _run_orchestrator, mid=mid)
     else:

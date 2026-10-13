@@ -69,6 +69,7 @@ class TurnContext:
     clean_text: str
     display_name: Optional[str] = None
     mid: Optional[str] = None
+    source_messages: list[tuple[str, Optional[str]]] = field(default_factory=list)
     core_profile: dict[str, Any] = field(default_factory=dict)
     updated_style: dict[str, Any] = field(default_factory=dict)
     full_messages: list[dict[str, str]] = field(default_factory=list)
@@ -163,18 +164,36 @@ class ChatOrchestrator:
         psid: str,
         text: str,
         mid: Optional[str] = None,
+        source_messages: Optional[list[tuple[str, Optional[str]]]] = None,
     ) -> Optional[TurnContext]:
         """Prepare conversational context, checking deduplication and building prompt messages."""
-        clean_text = text.strip()
-        if not clean_text:
-            return None
-
         # ---------------- Phase 1: DB Read Session ----------------
         async with self._session_factory() as read_session:
-            # Step 0: Deduplicate via DB if mid provided
-            if mid and await is_message_mid_exists(read_session, mid):
-                logger.info("Ignoring duplicate message mid via DB: %s", mid)
+            # Step 0: Normalize the original events and discard only events that
+            # have already been persisted. A mixed retry batch must still process
+            # its new messages.
+            incoming_messages = source_messages or [(text, mid)]
+            incoming_messages = [
+                (item_text.strip(), item_mid)
+                for item_text, item_mid in incoming_messages
+                if item_text.strip()
+            ]
+            retained_messages: list[tuple[str, Optional[str]]] = []
+            for item_text, item_mid in incoming_messages:
+                if item_mid and await is_message_mid_exists(read_session, item_mid):
+                    logger.info("Ignoring persisted message event in mixed batch")
+                    continue
+                retained_messages.append((item_text, item_mid))
+
+            if not retained_messages:
                 return None
+
+            incoming_messages = retained_messages
+            clean_text = "\n".join(item_text for item_text, _ in incoming_messages)
+            mid = next(
+                (item_mid for _, item_mid in reversed(incoming_messages) if item_mid),
+                None,
+            )
 
             # A genuine new activity supersedes the pending inactivity countdown.
             pending_timer = self._inactivity_timers.pop(psid, None)
@@ -281,7 +300,7 @@ class ChatOrchestrator:
         full_messages = build_chat_messages(
             system_prompt=system_prompt,
             window_messages=window_messages,
-            current_user_text=clean_text,
+            current_user_messages=[item_text for item_text, _ in incoming_messages],
         )
 
         return TurnContext(
@@ -290,6 +309,7 @@ class ChatOrchestrator:
             clean_text=clean_text,
             display_name=display_name,
             mid=mid,
+            source_messages=incoming_messages,
             core_profile=core_profile,
             updated_style=updated_style,
             full_messages=full_messages,
@@ -321,7 +341,8 @@ class ChatOrchestrator:
                     await record_llm_usage(write_session, reply.model, reply.usage_tokens)
 
                 # Preserve incoming text and billed usage even if delivery later fails.
-                await add_message(write_session, ctx.user_id, "user", ctx.clean_text, mid=ctx.mid)
+                for item_text, item_mid in ctx.source_messages or [(ctx.clean_text, ctx.mid)]:
+                    await add_message(write_session, ctx.user_id, "user", item_text, mid=item_mid)
                 await update_user_profiles(
                     write_session,
                     ctx.user_id,
@@ -353,13 +374,19 @@ class ChatOrchestrator:
         create_background_task(
             self._run_background_tasks(
                 user_id=ctx.user_id,
-                user_msg_count=ctx.user_msg_count + 1,
+                user_msg_count=ctx.user_msg_count + max(1, len(ctx.source_messages)),
             ),
             name=f"bg_tasks_user_{ctx.user_id}",
         )
         self._schedule_inactivity_timer(ctx.psid, ctx.user_id)
 
-    async def handle_turn(self, psid: str, text: str, mid: Optional[str] = None) -> None:
+    async def handle_turn(
+        self,
+        psid: str,
+        text: str,
+        mid: Optional[str] = None,
+        source_messages: Optional[list[tuple[str, Optional[str]]]] = None,
+    ) -> None:
         """Process one conversational turn for user.
 
         Any failure before the reply is delivered results in a short apology message
@@ -368,7 +395,7 @@ class ChatOrchestrator:
         delivered = False
         ctx = None
         try:
-            ctx = await self.prepare_context(psid, text, mid)
+            ctx = await self.prepare_context(psid, text, mid, source_messages)
             if ctx is None:
                 return
 

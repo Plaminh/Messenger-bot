@@ -24,6 +24,22 @@ FRIENDLY_FALLBACK_TEXT = "mình hơi đơ xíu, lát nói tiếp nhé 🥺"
 MAX_RETRY_AFTER_SECONDS = 8.0
 
 
+def _error_category(exc: Exception) -> str:
+    """Return a safe operational category without logging provider payloads."""
+    if isinstance(exc, RateLimitError):
+        return "rate_limit"
+    if isinstance(exc, APITimeoutError):
+        return "timeout"
+    if isinstance(exc, APIStatusError):
+        status = getattr(exc, "status_code", None)
+        if isinstance(status, int):
+            return f"http_{status // 100}xx"
+        return "api_status"
+    if isinstance(exc, (IndexError, AttributeError, TypeError, ValueError)):
+        return "invalid_response"
+    return "unexpected"
+
+
 class GroqProvider(LLMProvider):
     """Production LLM provider utilizing Groq API."""
 
@@ -70,11 +86,14 @@ class GroqProvider(LLMProvider):
             kwargs["response_format"] = {"type": "json_object"}
 
         last_error: Optional[Exception] = None
+        logger.info("LLM call model=%s", model_name)
 
         for attempt in range(max_retries):
             try:
                 response = await self._client.chat.completions.create(**kwargs)
                 content = response.choices[0].message.content or ""
+                if not content.strip():
+                    raise ValueError("empty completion")
                 usage_tokens = 0
                 if response.usage:
                     usage_tokens = response.usage.total_tokens
@@ -145,7 +164,11 @@ class GroqProvider(LLMProvider):
 
             except Exception as exc:
                 last_error = exc
-                logger.error("Unexpected error invoking model %s: %s", model_name, exc)
+                logger.error(
+                    "LLM request failed model=%s error_category=%s",
+                    model_name,
+                    _error_category(exc),
+                )
                 raise exc
 
         raise last_error or RuntimeError(f"Failed calling model {model_name} after {max_retries} retries")
@@ -161,6 +184,7 @@ class GroqProvider(LLMProvider):
     ) -> LLMResult:
         """Generate response with fallback chain (main -> fast -> friendly message)."""
         target_model = self._get_model_for_tier(model_tier)
+        logger.info("LLM selected_model=%s fallback_used=false", target_model)
 
         try:
             result = await self._call_model_with_retries(
@@ -196,15 +220,19 @@ class GroqProvider(LLMProvider):
 
         except Exception as exc:
             logger.warning(
-                "Model %s failed: %s. Initiating fallback chain.",
+                "LLM primary failed model=%s error_category=%s fallback_used=%s",
                 target_model,
-                exc,
+                _error_category(exc),
+                model_tier == "main",
             )
 
             # Fallback step 1: If main model failed, try fast model
             if model_tier == "main":
                 try:
-                    logger.info("Falling back from main to fast model (%s)", self.fast_model)
+                    logger.info(
+                        "LLM fallback selected_model=%s fallback_used=true",
+                        self.fast_model,
+                    )
                     return await self._call_model_with_retries(
                         self.fast_model,
                         messages,
@@ -213,10 +241,15 @@ class GroqProvider(LLMProvider):
                         temperature=temperature,
                     )
                 except Exception as fast_exc:
-                    logger.error("Fast fallback model also failed: %s", fast_exc)
+                    logger.error(
+                        "LLM fallback failed model=%s error_category=%s fallback_used=true",
+                        self.fast_model,
+                        _error_category(fast_exc),
+                    )
 
             # Fallback step 2: If everything fails and not json_mode, return warm friendly message
             if not json_mode:
+                logger.warning("LLM static fallback used fallback_used=true error_category=provider_unavailable")
                 return LLMResult(
                     content=FRIENDLY_FALLBACK_TEXT,
                     usage_tokens=0,
@@ -225,6 +258,7 @@ class GroqProvider(LLMProvider):
                 )
 
             # For json_mode failure, return empty valid json
+            logger.warning("LLM JSON fallback used fallback_used=true error_category=provider_unavailable")
             return LLMResult(
                 content="{}",
                 usage_tokens=0,
