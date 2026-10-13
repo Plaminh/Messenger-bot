@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from app.core.logging import configure_logging, get_logger
 from app.core.db import get_async_engine
-from app.core.tasks import cancel_background_tasks
+from app.core.tasks import cancel_background_tasks, create_background_task
 from app.api.health import router as health_router
 from app.api.webhook import router as webhook_router
 from app.chat.debounce import MessageDebouncer
@@ -28,6 +28,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.orchestrator = ChatOrchestrator(messenger_client=messenger_client)
     app.state.debouncer = MessageDebouncer()
     app.state.deduplicator = MessageDeduplicator()
+    create_background_task(
+        app.state.orchestrator.recover_pending_extractions(),
+        name="recover_pending_extractions",
+    )
 
     yield
 

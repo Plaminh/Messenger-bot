@@ -4,9 +4,7 @@ Distills persistent facts about the user every ~6 messages or after inactivity.
 Calls tier 'fast' in JSON mode and applies add/update/delete operations directly.
 """
 
-from datetime import datetime, timezone
 import json
-from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -31,22 +29,9 @@ EXTRACTION_FIRST_RUN_MESSAGES = 12  # no watermark yet: look at the latest N mes
 EXTRACTION_MAX_BATCH_MESSAGES = 30  # per run, messages after the watermark
 
 
-def should_trigger_extraction(
-    user_msg_count: int,
-    last_user_msg_at: Optional[datetime],
-) -> bool:
+def should_trigger_extraction(user_msg_count: int) -> bool:
     """Check if memory extraction conditions are satisfied."""
-    if user_msg_count > 0 and user_msg_count % EXTRACTION_MESSAGE_INTERVAL == 0:
-        return True
-
-    if last_user_msg_at:
-        now = datetime.now(timezone.utc)
-        if last_user_msg_at.tzinfo is None:
-            last_user_msg_at = last_user_msg_at.replace(tzinfo=timezone.utc)
-        if (now - last_user_msg_at).total_seconds() >= EXTRACTION_INACTIVITY_SECONDS:
-            return True
-
-    return False
+    return user_msg_count > 0 and user_msg_count % EXTRACTION_MESSAGE_INTERVAL == 0
 
 
 async def extract_and_sync_memories(

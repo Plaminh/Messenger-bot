@@ -31,6 +31,7 @@ from app.db.store import (
     get_recent_messages,
     get_summary,
     get_user_message_count,
+    get_users_with_pending_extraction,
     is_message_mid_exists,
     update_user_profiles,
 )
@@ -38,7 +39,11 @@ from app.integrations.llm.base import LLMProvider, LLMResult
 from app.integrations.llm.budget import record_llm_usage, should_downgrade_to_fast
 from app.integrations.llm.groq_provider import GroqProvider
 from app.integrations.messenger.client import MessengerClient
-from app.memory.extractor import extract_and_sync_memories, should_trigger_extraction
+from app.memory.extractor import (
+    EXTRACTION_INACTIVITY_SECONDS,
+    extract_and_sync_memories,
+    should_trigger_extraction,
+)
 from app.memory.retriever import retrieve_relevant_memories
 from app.memory.summarizer import maybe_run_rolling_summary
 from app.memory.window import (
@@ -80,7 +85,7 @@ class ChatOrchestrator:
         messenger_client: MessengerClient,
         session_factory: Optional[async_sessionmaker[AsyncSession]] = None,
         llm_provider: Optional[LLMProvider] = None,
-        inactivity_delay: float = 300.0,
+        inactivity_delay: float = EXTRACTION_INACTIVITY_SECONDS,
     ) -> None:
         self._session_factory = session_factory or get_async_session_maker()
         self._messenger = messenger_client
@@ -108,7 +113,12 @@ class ChatOrchestrator:
             await asyncio.gather(*timers, return_exceptions=True)
         self._extraction_locks.clear()
 
-    def _schedule_inactivity_timer(self, psid: str, user_id: int) -> None:
+    def _schedule_inactivity_timer(
+        self,
+        psid: str,
+        user_id: int,
+        delay: Optional[float] = None,
+    ) -> None:
         """Reset and schedule per-user inactivity timer for memory extraction."""
         existing_timer = self._inactivity_timers.pop(psid, None)
         if existing_timer:
@@ -116,7 +126,7 @@ class ChatOrchestrator:
 
         async def _inactivity_worker(uid: int, user_psid: str) -> None:
             try:
-                await asyncio.sleep(self._inactivity_delay)
+                await asyncio.sleep(self._inactivity_delay if delay is None else delay)
             except asyncio.CancelledError:
                 return
 
@@ -135,7 +145,6 @@ class ChatOrchestrator:
         self,
         user_id: int,
         user_msg_count: int,
-        last_user_msg_at: Optional[datetime],
     ) -> None:
         """Execute rolling summarizer and memory extractor in background."""
         try:
@@ -144,7 +153,7 @@ class ChatOrchestrator:
                 await maybe_run_rolling_summary(session, user_id, self._llm)
 
             # 2. Long-term memory extraction check (per-user lock + watermark => no duplicates)
-            if should_trigger_extraction(user_msg_count, last_user_msg_at):
+            if should_trigger_extraction(user_msg_count):
                 await self._extract_memories(user_id)
         except Exception as exc:
             logger.error("Error executing background tasks for user_id=%d: %s", user_id, exc)
@@ -160,11 +169,6 @@ class ChatOrchestrator:
         if not clean_text:
             return None
 
-        # Cancel any pending inactivity timer for this user immediately upon new activity
-        pending_timer = self._inactivity_timers.pop(psid, None)
-        if pending_timer:
-            pending_timer.cancel()
-
         # ---------------- Phase 1: DB Read Session ----------------
         async with self._session_factory() as read_session:
             # Step 0: Deduplicate via DB if mid provided
@@ -172,16 +176,22 @@ class ChatOrchestrator:
                 logger.info("Ignoring duplicate message mid via DB: %s", mid)
                 return None
 
+            # A genuine new activity supersedes the pending inactivity countdown.
+            pending_timer = self._inactivity_timers.pop(psid, None)
+            if pending_timer:
+                pending_timer.cancel()
+
             # Step 1: User lookup / creation
             user = await get_or_create_user(read_session, psid)
 
             # Step 2: Command handling
             if is_command(clean_text):
+                command = clean_text.split()[0].lower()
                 cmd_reply = await handle_command(read_session, user, clean_text)
                 if cmd_reply:
                     await self._messenger.send_human_like_response(psid, cmd_reply)
                     # For non-destructive commands, record dialog turn
-                    if clean_text.split()[0].lower() != "/quen":
+                    if command != "/quen":
                         try:
                             await add_message(read_session, user.id, "user", clean_text, mid=mid)
                         except IntegrityError:
@@ -189,6 +199,10 @@ class ChatOrchestrator:
                             return None
                         await add_message(read_session, user.id, "assistant", cmd_reply)
                 await read_session.commit()
+                if command == "/quen":
+                    self._extraction_locks.pop(user.id, None)
+                else:
+                    self._schedule_inactivity_timer(psid, user.id)
                 return None
 
             user_id = user.id
@@ -329,18 +343,12 @@ class ChatOrchestrator:
             await add_message(session, ctx.user_id, "assistant", reply.content)
             await session.commit()
 
-    def schedule_background(
-        self,
-        ctx: TurnContext,
-        now: Optional[datetime] = None,
-    ) -> None:
+    def schedule_background(self, ctx: TurnContext) -> None:
         """Schedule asynchronous rolling summarization and inactivity extraction."""
-        bg_time = now or datetime.now(timezone.utc)
         create_background_task(
             self._run_background_tasks(
                 user_id=ctx.user_id,
                 user_msg_count=ctx.user_msg_count + 1,
-                last_user_msg_at=bg_time,
             ),
             name=f"bg_tasks_user_{ctx.user_id}",
         )
@@ -353,6 +361,7 @@ class ChatOrchestrator:
         instead of silence.
         """
         delivered = False
+        ctx = None
         try:
             ctx = await self.prepare_context(psid, text, mid)
             if ctx is None:
@@ -371,11 +380,29 @@ class ChatOrchestrator:
             await self.persist_delivered_reply(ctx, reply)
 
             # Schedule background tasks asynchronously with strong reference tracking
-            self.schedule_background(ctx, now)
+            self.schedule_background(ctx)
         except Exception as exc:
             logger.error("Turn failed for psid=%s: %s", psid, exc, exc_info=True)
+            if ctx is not None:
+                self._schedule_inactivity_timer(ctx.psid, ctx.user_id)
             if not delivered:
                 await self._send_error_reply(psid)
+
+    async def recover_pending_extractions(self) -> int:
+        """Restore inactivity extraction timers after a process restart."""
+        try:
+            async with self._session_factory() as session:
+                users = await get_users_with_pending_extraction(session, limit=500)
+            for index, (user_id, psid) in enumerate(users):
+                self._schedule_inactivity_timer(
+                    psid,
+                    user_id,
+                    delay=self._inactivity_delay + index * 2,
+                )
+            return len(users)
+        except Exception as exc:
+            logger.warning("Không thể khôi phục lịch trích xuất ký ức: %s", exc)
+            return 0
 
     async def _send_error_reply(self, psid: str) -> None:
         """Best-effort apology when the pipeline failed; never raises."""

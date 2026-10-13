@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import Any, Optional
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -165,6 +165,22 @@ async def get_user_message_count(session: AsyncSession, user_id: int) -> int:
     result = await session.execute(stmt)
     count = result.scalar()
     return count or 0
+
+
+async def get_users_with_pending_extraction(
+    session: AsyncSession,
+    limit: int = 500,
+) -> list[tuple[int, str]]:
+    """Return users with messages newer than their extraction watermark."""
+    pending_message = exists(
+        select(Message.id).where(
+            Message.user_id == User.id,
+            Message.id > func.coalesce(User.last_extracted_message_id, 0),
+        )
+    )
+    stmt = select(User.id, User.fb_psid).where(pending_message).limit(min(limit, 500))
+    result = await session.execute(stmt)
+    return [(user_id, fb_psid) for user_id, fb_psid in result.all()]
 
 
 async def get_summary(session: AsyncSession, user_id: int) -> Optional[Summary]:
