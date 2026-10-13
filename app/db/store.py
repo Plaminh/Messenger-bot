@@ -208,7 +208,6 @@ async def add_memory(
     content: str,
     category: str,
     importance: int,
-    embedding: Optional[list[float]] = None,
     source_message_ids: Optional[list[int]] = None,
 ) -> Memory:
     """Insert a durable text memory; legacy embeddings are not generated."""
@@ -217,7 +216,6 @@ async def add_memory(
         content=content,
         category=category,
         importance=max(1, min(10, importance)),
-        embedding=embedding,
         source_message_ids=source_message_ids or [],
     )
     session.add(mem)
@@ -231,7 +229,6 @@ async def update_memory(
     content: str,
     category: str,
     importance: int,
-    embedding: Optional[list[float]] = None,
     *,
     user_id: int,
 ) -> bool:

@@ -6,7 +6,7 @@ Calls tier 'fast' in JSON mode and applies add/update/delete operations directly
 
 from datetime import datetime, timezone
 import json
-from typing import Any, Optional
+from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -53,7 +53,6 @@ async def extract_and_sync_memories(
     session: AsyncSession,
     user_id: int,
     llm: LLMProvider,
-    embedder: Optional[Any] = None,  # ignored compatibility shim
 ) -> None:
     """Extract durable facts from recent dialogue and synchronize memory store."""
     # Only look at messages newer than the last extraction watermark so the same

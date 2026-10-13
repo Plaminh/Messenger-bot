@@ -16,6 +16,15 @@ logger = get_logger(__name__)
 MESSENGER_CHAR_LIMIT = 1900  # Conservative limit below Facebook's 2000 chars limit
 
 
+class DeliveryError(RuntimeError):
+    """Raised when no bubble, or only part of a reply, reached Messenger."""
+
+    def __init__(self, sent_bubbles: int, total_bubbles: int) -> None:
+        self.sent_bubbles = sent_bubbles
+        self.total_bubbles = total_bubbles
+        super().__init__(f"Messenger delivered {sent_bubbles}/{total_bubbles} bubbles")
+
+
 class MessengerClient:
     """Asynchronous client for sending messages via Meta Graph API."""
 
@@ -132,7 +141,8 @@ class MessengerClient:
         if not bubbles:
             return
 
-        for idx, bubble in enumerate(bubbles):
+        sent_bubbles = 0
+        for bubble in bubbles:
             # 2. Show typing indicator
             await self.send_action(recipient_psid, "typing_on")
 
@@ -141,7 +151,9 @@ class MessengerClient:
             await asyncio.sleep(delay)
 
             # 3. Send bubble
-            await self.send_text(recipient_psid, bubble)
+            if not await self.send_text(recipient_psid, bubble):
+                raise DeliveryError(sent_bubbles, len(bubbles))
+            sent_bubbles += 1
 
 
 # Module-level singleton factory

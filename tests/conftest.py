@@ -17,9 +17,6 @@ os.environ["GROQ_MODEL_FAST"] = "llama-3.1-8b-instant"
 os.environ["DAILY_TOKEN_BUDGET_MAIN"] = "100000"
 os.environ["DAILY_TOKEN_BUDGET_FAST"] = "500000"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
-os.environ["EMBEDDING_MODEL"] = "intfloat/multilingual-e5-small"
-os.environ["EMBEDDING_PRELOAD"] = "false"
-os.environ["EMBEDDING_ALLOW_DUMMY"] = "true"
 os.environ["LOG_LEVEL"] = "DEBUG"
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -67,15 +64,4 @@ def mock_llm():
             tier="main",
         )
     )
-    return mock
-
-
-@pytest.fixture
-def mock_embedder():
-    """Mock TextEmbedder with deterministic 384-dimensional normalized vectors."""
-    mock = MagicMock()
-    dummy_vec = [0.05] * 384
-    mock.embed_query = AsyncMock(return_value=dummy_vec)
-    mock.embed_passage = AsyncMock(return_value=dummy_vec)
-    mock.embed_passages = AsyncMock(return_value=[dummy_vec])
     return mock

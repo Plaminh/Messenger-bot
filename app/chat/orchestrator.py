@@ -77,7 +77,6 @@ class ChatOrchestrator:
         session_factory: Optional[async_sessionmaker[AsyncSession]] = None,
         messenger_client: Optional[MessengerClient] = None,
         llm_provider: Optional[LLMProvider] = None,
-        embedder: Optional[Any] = None,  # ignored compatibility shim; remove from callers
         inactivity_delay: float = 300.0,
     ) -> None:
         self._session_factory = session_factory or get_async_session_maker()

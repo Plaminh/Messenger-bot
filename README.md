@@ -137,7 +137,7 @@ python -m venv .venv
 source .venv/bin/activate  # Trên Linux/macOS
 # .venv\Scripts\activate   # Trên Windows
 
-# 2. Cài đặt thư viện
+# 2. Cài dependency runtime
 pip install -r requirements.txt
 
 # 3. Chạy migration
@@ -178,32 +178,13 @@ Người dùng có thể gõ trực tiếp các lệnh sau đầu tin nhắn:
 
 ## 7. Chạy Kiểm thử (Unit & Integration Tests)
 
-Toàn bộ kiểm thử độc lập với mạng ngoài, mock toàn bộ API Groq và Meta, sử dụng SQLite in-memory:
+Suite regression gọn, độc lập với mạng ngoài và dùng SQLite in-memory. Dependency test không nằm trong production image:
 ```bash
-pytest -v
+pip install -r requirements-dev.txt
+pytest -q
 ```
-Kiểm thử bao gồm:
-- Xác thực chữ ký HMAC-SHA256 (`test_security.py`)
-- Deduplication tin nhắn trong RAM LRU cache (`test_dedupe.py`)
-- Deduplication bền vững qua unique constraint DB & lưu `mid` (`test_dedupe_db.py`)
-- Webhook phản hồi 200 nhanh và xử lý file đính kèm phi văn bản (`test_webhook.py`)
-- Gộp tin nhắn liên tiếp bằng Debounce (`test_debounce.py`)
-- Tự động dọn dẹp user locks và buffers trong Debouncer (`test_debounce_cleanup.py`)
-- Cắt sliding window theo token budget (`test_window.py`)
-- Phân tích phong cách EMA và phát hiện xưng hô tiếng Việt (`test_style.py`)
-- Công thức xếp hạng ký ức đa yếu tố của Retriever (`test_retriever.py`)
-- Trích xuất ký ức qua JSON và khả năng tự phục hồi khi JSON lỗi (`test_extractor.py`)
-- Bộ đếm thời gian 5 phút không hoạt động kích hoạt trích xuất ký ức (`test_inactivity_extractor.py`)
-- Groq Provider: thử lại với exponential backoff 429, fallback sang `fast` tier và câu dự phòng thân thiện (`test_groq_provider.py`)
-- Cơ chế tự động hạ tier khi vượt quá 90% ngân sách token (`test_budget.py`)
-- Đếm token nguyên tử cho mọi lời gọi LLM (summarizer, extractor) (`test_fast_budget_usage.py`)
-- Xóa sạch dữ liệu người dùng với lệnh `/quen` (`test_commands.py`)
-- Phát hiện khủng hoảng và tắt mirror phong cách (`test_safety.py`)
-- Không giữ DB session trong lúc gọi LLM (`test_session_lifecycle.py`)
-- Giữ tin đến và token usage khi gửi thất bại; chỉ ghi reply assistant sau khi gửi thành công
-- Giữ reference cho task nền và log lỗi ngoại lệ unhandled (`test_background_tasks.py`)
-- Phân rã vòng đời lượt hội thoại rõ ràng qua `TurnContext` (`test_turn_lifecycle.py`)
-- Khởi tạo trong `lifespan` và inject dependency qua FastAPI `Depends` (`test_dependency_injection.py`)
+
+Suite giữ các ranh giới quan trọng: chữ ký webhook, echo/dedup, gửi thất bại hoặc chỉ gửi được một phần, cách ly truy hồi theo user, giới hạn ký ức, `/quen`, và startup không cần Torch/embedding.
 
 ---
 
