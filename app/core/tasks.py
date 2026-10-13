@@ -43,3 +43,16 @@ def create_background_task(
 def get_active_tasks() -> set[asyncio.Task]:
     """Return currently tracked active background tasks."""
     return _active_tasks
+
+
+async def cancel_background_tasks() -> None:
+    """Cancel and await all application-owned tasks during shutdown."""
+    loop = asyncio.get_running_loop()
+    tasks = [task for task in _active_tasks if task.get_loop() is loop]
+    stale = [task for task in _active_tasks if task.get_loop() is not loop]
+    for task in stale:
+        _active_tasks.discard(task)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)

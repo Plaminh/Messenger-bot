@@ -19,7 +19,6 @@ from app.db.store import (
     set_last_extracted_message_id,
     update_memory,
 )
-from app.integrations.embedder import TextEmbedder, get_embedder
 from app.integrations.llm.base import LLMProvider
 from app.integrations.llm.budget import record_llm_usage
 from app.memory.retriever import retrieve_relevant_memories
@@ -54,7 +53,7 @@ async def extract_and_sync_memories(
     session: AsyncSession,
     user_id: int,
     llm: LLMProvider,
-    embedder: Optional[TextEmbedder] = None,
+    embedder: Optional[Any] = None,  # ignored compatibility shim
 ) -> None:
     """Extract durable facts from recent dialogue and synchronize memory store."""
     # Only look at messages newer than the last extraction watermark so the same
@@ -72,8 +71,6 @@ async def extract_and_sync_memories(
     if len(recent_msgs) < 2:
         return
 
-    embedder_instance = embedder or get_embedder()
-
     # Form conversational snippet
     snippet_lines = []
     for msg in recent_msgs:
@@ -81,24 +78,13 @@ async def extract_and_sync_memories(
         snippet_lines.append(f"{speaker}: {msg.content}")
     dialogue_snippet = "\n".join(snippet_lines)
 
-    # Find up to 3 existing memories for context
-    query_vec = await embedder_instance.embed_query(dialogue_snippet[-200:])
     existing_memories = await retrieve_relevant_memories(
-        session,
-        user_id,
-        query_vec,
-        candidate_limit=10,
-        top_k=3,
+        session, user_id, dialogue_snippet[-500:], candidate_limit=20, top_k=5
     )
-
     existing_context = "\n".join(
-        [
-            f"[ID {m.id}] ({m.category}, quan trọng {m.importance}/10): {m.content}"
-            for m in existing_memories
-        ]
-    )
-    if not existing_context:
-        existing_context = "(Chưa có ký ức nào liên quan)"
+        f"[ID {memory.id}] ({memory.category}, {memory.importance}/10): {memory.content}"
+        for memory in existing_memories
+    ) or "(Chưa có ký ức liên quan)"
 
     system_prompt = (
         "Bạn là module trích xuất ký ức dài hạn cho chatbot người bạn thân.\n"
@@ -164,27 +150,23 @@ async def extract_and_sync_memories(
             mem_id = op_item.get("id")
 
             if op == "add" and fact:
-                vec = await embedder_instance.embed_passage(fact)
                 await add_memory(
                     session,
                     user_id=user_id,
                     content=fact,
                     category=category,
                     importance=importance,
-                    embedding=vec,
                     source_message_ids=source_msg_ids,
                 )
                 logger.info("Added memory for user_id=%d: %s", user_id, category)
 
             elif op == "update" and fact and mem_id:
-                vec = await embedder_instance.embed_passage(fact)
                 updated = await update_memory(
                     session,
                     memory_id=int(mem_id),
                     content=fact,
                     category=category,
                     importance=importance,
-                    embedding=vec,
                     user_id=user_id,
                 )
                 if updated:

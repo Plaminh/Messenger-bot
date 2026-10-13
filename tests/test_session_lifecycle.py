@@ -62,5 +62,5 @@ async def test_db_session_closed_during_llm_invocation(
     assert mock_llm.generate.call_count == 1
     # Verify NO db session was open during LLM invocation
     assert open_sessions_during_llm == 0
-    # Verify exactly 2 distinct sessions were used: one for read, one for write
-    assert sessions_opened_total == 2
+    # Read, incoming/usage write, then confirmed-delivery history write.
+    assert sessions_opened_total == 3

@@ -33,7 +33,6 @@ from app.db.store import (
     is_message_mid_exists,
     update_user_profiles,
 )
-from app.integrations.embedder import TextEmbedder, get_embedder
 from app.integrations.llm.base import LLMProvider, LLMResult
 from app.integrations.llm.budget import record_llm_usage, should_downgrade_to_fast
 from app.integrations.llm.groq_provider import GroqProvider
@@ -47,7 +46,7 @@ from app.memory.window import (
     build_recent_window,
 )
 from app.persona.prompt import assemble_system_prompt, build_chat_messages
-from app.persona.safety import is_crisis
+from app.persona.safety import contains_toxic_language, is_crisis
 from app.persona.style import detect_pronouns, update_style_profile
 
 logger = get_logger(__name__)
@@ -78,13 +77,12 @@ class ChatOrchestrator:
         session_factory: Optional[async_sessionmaker[AsyncSession]] = None,
         messenger_client: Optional[MessengerClient] = None,
         llm_provider: Optional[LLMProvider] = None,
-        embedder: Optional[TextEmbedder] = None,
+        embedder: Optional[Any] = None,  # ignored compatibility shim; remove from callers
         inactivity_delay: float = 300.0,
     ) -> None:
         self._session_factory = session_factory or get_async_session_maker()
         self._messenger = messenger_client or get_messenger_client()
         self._llm = llm_provider or GroqProvider()
-        self._embedder = embedder or get_embedder()
         self._inactivity_delay = inactivity_delay
         self._inactivity_timers: dict[str, asyncio.Task] = {}
         self._extraction_locks: dict[int, asyncio.Lock] = {}
@@ -94,7 +92,17 @@ class ChatOrchestrator:
         lock = self._extraction_locks.setdefault(user_id, asyncio.Lock())
         async with lock:
             async with self._session_factory() as session:
-                await extract_and_sync_memories(session, user_id, self._llm, self._embedder)
+                await extract_and_sync_memories(session, user_id, self._llm)
+
+    async def aclose(self) -> None:
+        """Cancel and await owned inactivity timers during application shutdown."""
+        timers = list(self._inactivity_timers.values())
+        self._inactivity_timers.clear()
+        for timer in timers:
+            timer.cancel()
+        if timers:
+            await asyncio.gather(*timers, return_exceptions=True)
+        self._extraction_locks.clear()
 
     def _schedule_inactivity_timer(self, psid: str, user_id: int) -> None:
         """Reset and schedule per-user inactivity timer for memory extraction."""
@@ -184,11 +192,10 @@ class ChatOrchestrator:
             raw_style = dict(user.style_profile or {})
 
             # Step 6: Memory retrieval
-            query_vec = await self._embedder.embed_query(clean_text)
             relevant_memories = await retrieve_relevant_memories(
                 read_session,
                 user_id,
-                query_vec,
+                clean_text,
                 top_k=6,
             )
 
@@ -210,17 +217,17 @@ class ChatOrchestrator:
             await read_session.commit()
 
         # ---------------- Phase 2: In-Memory Prep (No DB Session Held) ----------------
-        # Step 3: Pronoun detection in early messages
-        if "pronouns" not in core_profile:
+        crisis_active = is_crisis(clean_text)
+        toxic_active = contains_toxic_language(clean_text)
+
+        # Never learn pronouns or style from abusive/crisis text.
+        if not (crisis_active or toxic_active) and "pronouns" not in core_profile:
             detected_p = detect_pronouns(clean_text)
             if detected_p:
                 core_profile["pronouns"] = detected_p
 
         # Step 4: Statistical style analysis & EMA update
-        updated_style = update_style_profile(raw_style, clean_text)
-
-        # Step 5: Safety check (crisis detection)
-        crisis_active = is_crisis(clean_text)
+        updated_style = raw_style if (crisis_active or toxic_active) else update_style_profile(raw_style, clean_text)
 
         # Step 8: Prompt assembly
         recent_user_texts = [m.content for m in window_messages if m.role == "user"]
@@ -269,7 +276,7 @@ class ChatOrchestrator:
         reply: LLMResult,
         now: Optional[datetime] = None,
     ) -> bool:
-        """Persist messages, token usage, and user profiles in a single atomic transaction."""
+        """Persist the incoming turn and real usage before attempting delivery."""
         write_time = now or datetime.now(timezone.utc)
         async with self._session_factory() as write_session:
             try:
@@ -277,11 +284,8 @@ class ChatOrchestrator:
                 if reply.usage_tokens > 0:
                     await record_llm_usage(write_session, reply.model, reply.usage_tokens)
 
-                # Persist messages & profile updates in a single atomic transaction
+                # Preserve incoming text and billed usage even if delivery later fails.
                 await add_message(write_session, ctx.user_id, "user", ctx.clean_text, mid=ctx.mid)
-                # The friendly "I'm laggy" text is an error notice, not part of the conversation
-                if reply.tier != "fallback":
-                    await add_message(write_session, ctx.user_id, "assistant", reply.content)
                 await update_user_profiles(
                     write_session,
                     ctx.user_id,
@@ -298,6 +302,14 @@ class ChatOrchestrator:
             except Exception:
                 await write_session.rollback()
                 raise
+
+    async def persist_delivered_reply(self, ctx: TurnContext, reply: LLMResult) -> None:
+        """Add only content confirmed delivered to Messenger conversation history."""
+        if reply.tier == "fallback":
+            return
+        async with self._session_factory() as session:
+            await add_message(session, ctx.user_id, "assistant", reply.content)
+            await session.commit()
 
     def schedule_background(
         self,
@@ -338,6 +350,7 @@ class ChatOrchestrator:
             # Deliver response through Messenger client (mark_seen, typing, bubble delay)
             await self._messenger.send_human_like_response(ctx.psid, reply.content)
             delivered = True
+            await self.persist_delivered_reply(ctx, reply)
 
             # Schedule background tasks asynchronously with strong reference tracking
             self.schedule_background(ctx, now)

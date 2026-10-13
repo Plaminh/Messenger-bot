@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -16,7 +15,6 @@ from app.chat.orchestrator import ERROR_REPLY_TEXT, ChatOrchestrator
 from app.core.settings import Settings
 from app.db.models import Memory, Message, Summary, User
 from app.db.store import get_all_memories, upsert_summary
-from app.integrations.embedder import EmbedderUnavailableError, TextEmbedder
 from app.integrations.llm.base import LLMResult
 from app.integrations.llm.groq_provider import MAX_RETRY_AFTER_SECONDS, GroqProvider
 from app.memory.extractor import extract_and_sync_memories
@@ -220,13 +218,24 @@ async def test_fallback_reply_is_not_saved_as_assistant_message(db_session, mock
 
 @pytest.mark.asyncio
 async def test_pipeline_failure_sends_apology_instead_of_silence(db_session, mock_messenger):
-    broken_embedder = MagicMock()
-    broken_embedder.embed_query = AsyncMock(side_effect=RuntimeError("model gone"))
-    orch = _orchestrator(db_session, mock_messenger, _llm("unused", tier="main"), broken_embedder)
+    broken_llm = MagicMock()
+    broken_llm.generate = AsyncMock(side_effect=RuntimeError("provider gone"))
+    orch = _orchestrator(db_session, mock_messenger, broken_llm, None)
 
     await orch.handle_turn("psid_broken", "Alo")  # must not raise
 
     mock_messenger.send_human_like_response.assert_awaited_once_with("psid_broken", ERROR_REPLY_TEXT)
+
+
+@pytest.mark.asyncio
+async def test_delivery_failure_keeps_incoming_and_usage_but_not_assistant(db_session, mock_messenger):
+    mock_messenger.send_human_like_response = AsyncMock(side_effect=RuntimeError("Meta unavailable"))
+    orch = _orchestrator(db_session, mock_messenger, _llm("reply", tier="main", tokens=7), None)
+
+    await orch.handle_turn("psid_delivery_failure", "xin chào", mid="mid.delivery.failure")
+
+    rows = (await db_session.execute(select(Message.role, Message.content))).all()
+    assert [(row.role, row.content) for row in rows] == [("user", "xin chào")]
 
 
 # ---------------------------------------------------------------- A debouncer
@@ -275,24 +284,7 @@ async def test_huge_retry_after_falls_back_without_sleeping_for_hours():
         assert call.args[0] <= MAX_RETRY_AFTER_SECONDS
 
 
-# ---------------------------------------------------------------- #6 embedder
-@pytest.mark.asyncio
-async def test_embedder_raises_when_model_missing_and_dummy_not_allowed():
-    embedder = TextEmbedder(model_name="nonexistent/model", allow_dummy=False)
-    with patch.dict(sys.modules, {"sentence_transformers": None}):
-        with pytest.raises(EmbedderUnavailableError):
-            await embedder.preload()
-        with pytest.raises(EmbedderUnavailableError):
-            await embedder.embed_query("xin chào")
+def test_runtime_has_no_embedder_module():
+    import importlib.util
 
-
-@pytest.mark.asyncio
-async def test_dummy_vectors_differ_per_text_when_explicitly_allowed():
-    embedder = TextEmbedder(model_name="nonexistent/model", allow_dummy=True)
-    with patch.dict(sys.modules, {"sentence_transformers": None}):
-        a = await embedder.embed_query("mèo")
-        b = await embedder.embed_query("chó")
-        a2 = await embedder.embed_query("mèo")
-    assert a == a2
-    cosine = sum(x * y for x, y in zip(a, b))
-    assert cosine < 0.9
+    assert importlib.util.find_spec("app.integrations.embedder") is None

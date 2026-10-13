@@ -208,10 +208,10 @@ async def add_memory(
     content: str,
     category: str,
     importance: int,
-    embedding: list[float],
+    embedding: Optional[list[float]] = None,
     source_message_ids: Optional[list[int]] = None,
 ) -> Memory:
-    """Insert a new semantic memory."""
+    """Insert a durable text memory; legacy embeddings are not generated."""
     mem = Memory(
         user_id=user_id,
         content=content,
@@ -231,7 +231,7 @@ async def update_memory(
     content: str,
     category: str,
     importance: int,
-    embedding: list[float],
+    embedding: Optional[list[float]] = None,
     *,
     user_id: int,
 ) -> bool:
@@ -247,7 +247,6 @@ async def update_memory(
             content=content,
             category=category,
             importance=max(1, min(10, importance)),
-            embedding=embedding,
             last_accessed_at=func.now(),
         )
     )

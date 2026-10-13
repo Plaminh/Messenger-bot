@@ -12,9 +12,9 @@ from app.db.models import LLMUsage
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
-def get_current_vn_date() -> date:
+def get_current_vn_date(at: datetime | None = None) -> date:
     """Return current date in Vietnam timezone (UTC+7)."""
-    return datetime.now(VN_TZ).date()
+    return (at.astimezone(VN_TZ) if at is not None else datetime.now(VN_TZ)).date()
 
 
 async def record_llm_usage(

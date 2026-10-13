@@ -54,6 +54,7 @@ async def test_decomposed_turn_lifecycle_steps(
     now = datetime.now(timezone.utc)
     persisted = await orchestrator.persist_turn(ctx, reply, now)
     assert persisted is True
+    await orchestrator.persist_delivered_reply(ctx, reply)
 
     # Verify messages in DB
     async with session_factory() as verify_session:

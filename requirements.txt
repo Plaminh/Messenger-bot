@@ -12,9 +12,8 @@ pgvector==0.3.6
 pydantic-settings==2.7.0
 httpx==0.28.1
 
-# LLM & Embedding (CPU)
+# LLM
 groq==0.14.0
-sentence-transformers==3.3.1
 
 # Testing
 pytest==8.3.4

@@ -1,123 +1,110 @@
-"""Memory retrieval and composite re-ranking.
+"""Bounded deterministic retrieval for durable text memories.
 
-Finds relevant memories using vector similarity, then re-ranks via:
-score = A*cosine + B*exp(-Δdays/TAU) + C*(importance/10)
-Updates last_accessed_at for top memories.
+Candidates are filtered by user and keyword matches in SQL, then ranked with
+keyword overlap (0.55), recency (0.25), and importance (0.20). This is a
+small heuristic rather than semantic search. Greetings with no useful terms
+fall back to recent and important memories.
 """
 
 from datetime import datetime, timezone
 import math
-from typing import List, Tuple
-import numpy as np
-from sqlalchemy import func, select, update
+import re
+import unicodedata
+
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.logging import get_logger
-from app.core.settings import get_settings
 from app.db.models import Memory
 
-logger = get_logger(__name__)
+MAX_MEMORY_CHARS = 3000
+VIETNAMESE_STOPWORDS = {"và", "là", "cho", "mình", "bạn", "của", "có", "nhé", "nha", "ơi", "rồi"}
+_VIETNAMESE_SOURCE = "àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ"
+_VIETNAMESE_ASCII = "aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd"
 
 
-def compute_python_cosine(vec_a: list[float], vec_b: list[float]) -> float:
-    """Compute cosine similarity between two float vectors using numpy."""
-    a = np.array(vec_a, dtype=np.float32)
-    b = np.array(vec_b, dtype=np.float32)
-    norm_a = np.linalg.norm(a)
-    norm_b = np.linalg.norm(b)
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return float(np.dot(a, b) / (norm_a * norm_b))
+def normalize_memory_text(text: str) -> str:
+    """Normalize case, accents, whitespace, and punctuation consistently."""
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    without_marks = "".join(char for char in decomposed if not unicodedata.combining(char))
+    without_marks = without_marks.replace("đ", "d")
+    return re.sub(r"[^\w]+", " ", without_marks, flags=re.UNICODE).strip()
+
+
+def extract_keywords(text: str) -> list[str]:
+    """Extract useful normalized terms, treating accented and plain text alike."""
+    stopwords = {normalize_memory_text(word) for word in VIETNAMESE_STOPWORDS}
+    return [word for word in normalize_memory_text(text).split() if len(word) >= 2 and word not in stopwords]
 
 
 async def retrieve_relevant_memories(
     session: AsyncSession,
     user_id: int,
-    query_vector: list[float],
+    query_text: str,
     *,
-    candidate_limit: int = 20,
+    candidate_limit: int = 30,
     top_k: int = 6,
 ) -> list[Memory]:
-    """Retrieve top-k relevant memories for a user using composite reranking."""
-    settings = get_settings()
-    weight_a = settings.RETRIEVER_WEIGHT_COSINE
-    weight_b = settings.RETRIEVER_WEIGHT_RECENCY
-    weight_c = settings.RETRIEVER_WEIGHT_IMPORTANCE
-    tau_days = settings.RETRIEVER_TAU_DAYS
+    """Return bounded, user-isolated memories ranked without loading the table."""
+    candidate_limit = max(1, min(candidate_limit, 50))
+    top_k = max(1, min(top_k, 10))
+    keywords = extract_keywords(query_text)
 
-    candidates: list[tuple[Memory, float]] = []
-
-    # Check dialect for pgvector support vs Python fallback (e.g. SQLite tests)
+    ordering = (Memory.last_accessed_at.desc(), Memory.importance.desc(), Memory.id.desc())
+    stmt = select(Memory).where(Memory.user_id == user_id)
     bind = session.get_bind()
-    is_postgres = bind and "postgresql" in bind.dialect.name
-
-    if is_postgres:
-        try:
-            # PostgreSQL with pgvector cosine distance operator <=>
-            distance_col = Memory.embedding.cosine_distance(query_vector).label("distance")
-            stmt = (
-                select(Memory, distance_col)
-                .where(Memory.user_id == user_id)
-                .order_by(distance_col.asc())
-                .limit(candidate_limit)
-            )
-            result = await session.execute(stmt)
-            for mem, dist in result.all():
-                cosine_sim = 1.0 - float(dist)
-                candidates.append((mem, cosine_sim))
-        except Exception as exc:
-            logger.warning("pgvector cosine query failed, falling back to python ranking: %s", exc)
-            candidates = []
-
-    if not candidates:
-        # Fallback for SQLite or when pgvector query is not applicable
-        stmt = (
-            select(Memory)
-            .where(Memory.user_id == user_id)
-            .limit(candidate_limit * 2)
-        )
-        result = await session.execute(stmt)
-        memories = list(result.scalars().all())
-        for mem in memories:
-            cos = compute_python_cosine(query_vector, mem.embedding)
-            candidates.append((mem, cos))
-
+    if keywords and bind is not None and bind.dialect.name == "postgresql":
+        # PostgreSQL does the user filter and keyword candidate selection. translate
+        # gives deterministic accented/unaccented matching without an extension.
+        searchable = func.translate(func.lower(Memory.content), _VIETNAMESE_SOURCE, _VIETNAMESE_ASCII)
+        stmt = stmt.where(or_(*(searchable.contains(term) for term in set(keywords))))
+    stmt = stmt.order_by(*ordering).limit(candidate_limit)
+    result = await session.execute(stmt)
+    candidates = list(result.scalars().all())
     if not candidates:
         return []
 
-    # Composite reranking: A*cosine + B*exp(-Δdays/TAU) + C*(importance/10)
+    query_terms = set(keywords)
     now = datetime.now(timezone.utc)
-    scored_candidates: list[tuple[float, Memory]] = []
-
-    for mem, cosine in candidates:
-        # Calculate days elapsed since last access (or created)
-        last_accessed = mem.last_accessed_at
-        if last_accessed is None:
-            last_accessed = mem.created_at
-
+    scored: list[tuple[float, Memory]] = []
+    for memory in candidates:
+        last_accessed = memory.last_accessed_at or memory.created_at
         if last_accessed.tzinfo is None:
             last_accessed = last_accessed.replace(tzinfo=timezone.utc)
+        age_days = max(0.0, (now - last_accessed).total_seconds() / 86400.0)
+        recency = math.exp(-age_days / 14.0)
+        memory_terms = set(extract_keywords(memory.content))
+        keyword_score = len(memory_terms & query_terms) / len(query_terms) if query_terms else 0.0
+        if query_terms and keyword_score == 0:
+            continue
+        score = (0.55 * keyword_score) + (0.25 * recency) + (0.20 * (memory.importance / 10.0))
+        scored.append((score, memory))
 
-        delta_days = max(0.0, (now - last_accessed).total_seconds() / 86400.0)
-        recency = math.exp(-delta_days / tau_days)
-        importance_norm = mem.importance / 10.0
+    # No useful terms (for example a greeting): return a small deterministic
+    # recent/important fallback. With useful terms, unrelated rows are excluded.
+    if not query_terms:
+        scored = [
+            (
+                0.25 * math.exp(-max(0.0, (now - ((m.last_accessed_at or m.created_at).replace(tzinfo=timezone.utc) if (m.last_accessed_at or m.created_at).tzinfo is None else (m.last_accessed_at or m.created_at))).total_seconds() / 86400.0) / 14.0)
+                + 0.20 * (m.importance / 10.0),
+                m,
+            )
+            for m in candidates
+        ]
+        top_k = min(top_k, 3)
+    scored.sort(key=lambda item: (item[0], item[1].id), reverse=True)
+    selected: list[Memory] = []
+    total_chars = 0
+    for _, memory in scored:
+        if len(selected) >= top_k or total_chars + len(memory.content) > MAX_MEMORY_CHARS:
+            continue
+        selected.append(memory)
+        total_chars += len(memory.content)
 
-        composite_score = (weight_a * cosine) + (weight_b * recency) + (weight_c * importance_norm)
-        scored_candidates.append((composite_score, mem))
-
-    # Sort descending by composite score
-    scored_candidates.sort(key=lambda x: x[0], reverse=True)
-    top_memories = [mem for _, mem in scored_candidates[:top_k]]
-
-    # Update last_accessed_at for used memories
-    if top_memories:
-        top_ids = [m.id for m in top_memories]
-        update_stmt = (
+    if selected:
+        await session.execute(
             update(Memory)
-            .where(Memory.id.in_(top_ids))
+            .where(Memory.user_id == user_id, Memory.id.in_([memory.id for memory in selected]))
             .values(last_accessed_at=func.now())
         )
-        await session.execute(update_stmt)
-        await session.commit()
-
-    return top_memories
+        await session.flush()
+    return selected

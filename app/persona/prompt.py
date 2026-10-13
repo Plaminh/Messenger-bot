@@ -43,9 +43,9 @@ NEGATIVE_CONSTRAINTS = (
 )
 
 
-def get_current_time_str() -> str:
+def get_current_time_str(at: Optional[datetime] = None) -> str:
     """Format current time in Vietnam timezone."""
-    now = datetime.now(VN_TZ)
+    now = at.astimezone(VN_TZ) if at is not None else datetime.now(VN_TZ)
     days_vi = [
         "Thứ Hai",
         "Thứ Ba",

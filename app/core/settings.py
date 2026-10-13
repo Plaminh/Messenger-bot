@@ -33,21 +33,8 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = Field(..., description="PostgreSQL connection string with pgvector support")
 
-    # Memory & Embedder
-    EMBEDDING_MODEL: str = Field(default="intfloat/multilingual-e5-small", description="Sentence transformer model")
-    EMBEDDING_PRELOAD: bool = Field(default=True, description="Load the embedding model during app startup (fail fast)")
-    EMBEDDING_ALLOW_DUMMY: bool = Field(
-        default=False,
-        description="Allow deterministic fake vectors when the model cannot be loaded (tests/offline dev ONLY)",
-    )
-    RETRIEVER_WEIGHT_COSINE: float = Field(default=1.0, description="Cosine similarity weight A")
-    RETRIEVER_WEIGHT_RECENCY: float = Field(default=0.3, description="Recency decay weight B")
-    RETRIEVER_WEIGHT_IMPORTANCE: float = Field(default=0.3, description="Importance score weight C")
-    RETRIEVER_TAU_DAYS: float = Field(default=14.0, description="Exponential decay half-life factor in days")
-
-    # Logging and Environment
+    # Logging; local time is fixed to Asia/Ho_Chi_Minh in prompt and budget code.
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")
-    TZ: str = Field(default="Asia/Ho_Chi_Minh", description="Application timezone")
 
     @property
     def async_database_url(self) -> str:

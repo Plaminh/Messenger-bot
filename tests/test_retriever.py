@@ -1,78 +1,50 @@
-"""Tests for composite memory retriever and re-ranking."""
-
 from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Memory, User
-from app.memory.retriever import compute_python_cosine, retrieve_relevant_memories
+from app.memory.retriever import MAX_MEMORY_CHARS, normalize_memory_text, retrieve_relevant_memories
 
 
-def test_compute_python_cosine():
-    v1 = [1.0, 0.0, 0.0]
-    v2 = [1.0, 0.0, 0.0]
-    v3 = [0.0, 1.0, 0.0]
-
-    assert abs(compute_python_cosine(v1, v2) - 1.0) < 1e-5
-    assert abs(compute_python_cosine(v1, v3) - 0.0) < 1e-5
+def test_memory_normalization_matches_accented_and_unaccented_text():
+    assert normalize_memory_text("  Cà-phê!!!  đen ") == "ca phe den"
+    assert normalize_memory_text("CA PHE den") == "ca phe den"
 
 
 @pytest.mark.asyncio
-async def test_retriever_ranking_with_composite_score(db_session: AsyncSession):
-    # Create test user
+async def test_retriever_ranks_keyword_recency_and_importance_with_isolation(db_session: AsyncSession):
     user = User(fb_psid="psid_retriever_test", style_profile={}, core_profile={})
+    other = User(fb_psid="psid_retriever_other", style_profile={}, core_profile={})
+    db_session.add_all([user, other])
+    await db_session.commit()
+    await db_session.refresh(user)
+    await db_session.refresh(other)
+    now = datetime.now(timezone.utc)
+
+    relevant = Memory(user_id=user.id, content="User thích uống cà phê đen không đường", category="preference", importance=9, created_at=now, last_accessed_at=now)
+    stale = Memory(user_id=user.id, content="User từng uống cà phê ở Hà Nội", category="event", importance=2, created_at=now - timedelta(days=30), last_accessed_at=now - timedelta(days=30))
+    foreign = Memory(user_id=other.id, content="User thích cà phê đen", category="preference", importance=10, created_at=now, last_accessed_at=now)
+    db_session.add_all([relevant, stale, foreign])
+    await db_session.commit()
+
+    results = await retrieve_relevant_memories(db_session, user.id, "CA PHE den", top_k=2)
+    assert [memory.id for memory in results] == [relevant.id, stale.id]
+    assert all(memory.user_id == user.id for memory in results)
+
+
+@pytest.mark.asyncio
+async def test_retriever_limits_result_count_and_total_length(db_session: AsyncSession):
+    user = User(fb_psid="psid_retriever_limit", style_profile={}, core_profile={})
     db_session.add(user)
     await db_session.commit()
     await db_session.refresh(user)
-
-    now = datetime.now(timezone.utc)
-    # Memory 1: High cosine similarity (aligned vector), recent, high importance
-    m1 = Memory(
-        user_id=user.id,
-        content="User thích uống cà phê đen không đường",
-        category="preference",
-        importance=9,
-        embedding=[1.0] + [0.0] * 383,
-        created_at=now,
-        last_accessed_at=now,
-    )
-    # Memory 2: Low cosine similarity (orthogonal vector), low importance
-    m2 = Memory(
-        user_id=user.id,
-        content="User từng đi công tác Hà Nội năm ngoái",
-        category="event",
-        importance=3,
-        embedding=[0.0, 1.0] + [0.0] * 382,
-        created_at=now - timedelta(days=30),
-        last_accessed_at=now - timedelta(days=30),
-    )
-    # Memory 3: Moderate cosine similarity, high importance
-    m3 = Memory(
-        user_id=user.id,
-        content="User dị ứng với hải sản",
-        category="preference",
-        importance=10,
-        embedding=[0.7, 0.7] + [0.0] * 382,
-        created_at=now,
-        last_accessed_at=now,
-    )
-
-    db_session.add_all([m1, m2, m3])
+    db_session.add_all([
+        Memory(user_id=user.id, content=f"mèo {index} " + ("x" * 1000), category="other", importance=10)
+        for index in range(10)
+    ])
     await db_session.commit()
 
-    # Query vector aligned with Memory 1
-    query_vector = [1.0] + [0.0] * 383
-
-    results = await retrieve_relevant_memories(
-        db_session,
-        user.id,
-        query_vector,
-        candidate_limit=10,
-        top_k=2,
-    )
-
-    assert len(results) == 2
-    # Memory 1 should be ranked highest due to high cosine + high importance + recent
-    assert results[0].id == m1.id
-    # Memory 3 should be ranked 2nd
-    assert results[1].id == m3.id
+    results = await retrieve_relevant_memories(db_session, user.id, "mèo", top_k=10, candidate_limit=100)
+    assert len(results) <= 10
+    assert sum(len(memory.content) for memory in results) <= MAX_MEMORY_CHARS

@@ -89,7 +89,8 @@ class Memory(Base):
     content = Column(Text, nullable=False)
     category = Column(String(32), nullable=False)  # person|event|preference|feeling|goal|other
     importance = Column(SmallInteger, nullable=False)  # 1-10
-    embedding = Column(Vector(384), nullable=False)
+    # Historical column retained for compatibility; runtime no longer writes or searches it.
+    embedding = Column(Vector(384), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_accessed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     source_message_ids = Column(ARRAY_INT_TYPE, nullable=True, default=list)

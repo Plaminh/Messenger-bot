@@ -50,26 +50,12 @@ def extract_message_features(text: str) -> dict[str, Any]:
     emoji_count = len(emojis)
     emoji_ratio = emoji_count / max(1, word_count)
 
-    # Abbreviations
     abbrev_count = len(ABBREV_PATTERN.findall(clean_text))
     abbrev_ratio = abbrev_count / max(1, word_count)
-
-    # Lowercase ratio
     alpha_chars = [c for c in clean_text if c.isalpha()]
     lower_chars = [c for c in alpha_chars if c.islower()]
     lowercase_ratio = len(lower_chars) / max(1, len(alpha_chars))
-
-    # Punctuation style
-    has_ellipsis = "..." in clean_text
-    has_multi_exclamation = bool(re.search(r"!{2,}", clean_text))
-    has_no_end_period = not clean_text.endswith((".", "!", "?"))
-
-    # Laugh style
-    detected_laugh = None
-    for pattern, label in LAUGH_PATTERNS:
-        if pattern.search(clean_text):
-            detected_laugh = label
-            break
+    detected_laugh = next((label for pattern, label in LAUGH_PATTERNS if pattern.search(clean_text)), None)
 
     return {
         "word_count": word_count,
@@ -77,9 +63,9 @@ def extract_message_features(text: str) -> dict[str, Any]:
         "emoji_ratio": emoji_ratio,
         "abbrev_ratio": abbrev_ratio,
         "lowercase_ratio": lowercase_ratio,
-        "has_ellipsis": has_ellipsis,
-        "has_multi_exclamation": has_multi_exclamation,
-        "has_no_end_period": has_no_end_period,
+        "has_ellipsis": "..." in clean_text,
+        "has_multi_exclamation": bool(re.search(r"!{2,}", clean_text)),
+        "has_no_end_period": not clean_text.endswith((".", "!", "?")),
         "detected_laugh": detected_laugh,
     }
 
@@ -114,33 +100,9 @@ def update_style_profile(
     old_words = profile.get("avg_word_count", 15.0)
     profile["avg_word_count"] = round((1 - alpha) * old_words + alpha * obs["word_count"], 2)
 
-    # EMA for emoji ratio
+    # Keep only stable signals that materially affect response mirroring.
     old_emoji = profile.get("avg_emoji_ratio", 0.05)
     profile["avg_emoji_ratio"] = round((1 - alpha) * old_emoji + alpha * obs["emoji_ratio"], 3)
-
-    # EMA for abbrev ratio
-    old_abbrev = profile.get("avg_abbrev_ratio", 0.05)
-    profile["avg_abbrev_ratio"] = round((1 - alpha) * old_abbrev + alpha * obs["abbrev_ratio"], 3)
-
-    # EMA for lowercase ratio
-    old_lower = profile.get("avg_lowercase_ratio", 0.9)
-    profile["avg_lowercase_ratio"] = round((1 - alpha) * old_lower + alpha * obs["lowercase_ratio"], 3)
-
-    # Track laugh style frequency
-    if obs["detected_laugh"]:
-        laughs = dict(profile.get("laugh_styles", {}))
-        laughs[obs["detected_laugh"]] = laughs.get(obs["detected_laugh"], 0) + 1
-        profile["laugh_styles"] = laughs
-
-    # Track punctuation tendencies
-    punct = dict(profile.get("punct_styles", {}))
-    if obs["has_ellipsis"]:
-        punct["ellipsis"] = punct.get("ellipsis", 0) + 1
-    if obs["has_multi_exclamation"]:
-        punct["multi_exclamation"] = punct.get("multi_exclamation", 0) + 1
-    if obs["has_no_end_period"]:
-        punct["no_end_period"] = punct.get("no_end_period", 0) + 1
-    profile["punct_styles"] = punct
 
     return profile
 
@@ -158,14 +120,12 @@ def render_style_guidance(
     target_words = max(10, min(60, avg_words))
 
     emoji_ratio = style_profile.get("avg_emoji_ratio", 0.05)
-    abbrev_ratio = style_profile.get("avg_abbrev_ratio", 0.05)
     lower_ratio = style_profile.get("avg_lowercase_ratio", 0.9)
 
     guidelines = []
     # Length mirroring
     guidelines.append(f"- Độ dài trả lời: câu ngắn gọn, tương đương khoảng {target_words} - {target_words + 15} từ, không dông dài.")
 
-    # Lowercase preference
     if lower_ratio > 0.8:
         guidelines.append("- Ưa chuộng viết thường tự nhiên, ít trang trọng.")
 
@@ -175,15 +135,10 @@ def render_style_guidance(
     else:
         guidelines.append("- Dùng emoji nhẹ nhàng, ấm áp, phù hợp cảm xúc (1-2 cái).")
 
-    # Laugh style
     laughs = style_profile.get("laugh_styles", {})
     if laughs:
-        fav_laugh = max(laughs.items(), key=lambda x: x[1])[0]
+        fav_laugh = max(laughs.items(), key=lambda item: item[1])[0]
         guidelines.append(f"- Nếu có đùa vui, dùng kiểu cười quen thuộc: '{fav_laugh}'.")
-
-    # Abbreviations
-    if abbrev_ratio > 0.15:
-        guidelines.append("- Có thể dùng từ nói chuyện đời thường, thoải mái.")
 
     # Recent voice sample
     samples = [m.strip() for m in recent_user_messages if m.strip()][-3:]

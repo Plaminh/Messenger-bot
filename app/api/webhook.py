@@ -65,6 +65,15 @@ async def handle_messaging_event(
     if not sender_id:
         return
 
+    postback = messaging.get("postback")
+    if isinstance(postback, dict):
+        payload = postback.get("payload")
+        if payload in {"GET_STARTED", "HELP"}:
+            await orchestrator.handle_turn(sender_id, "/help")
+        else:
+            logger.info("Ignoring unknown postback payload")
+        return
+
     message = messaging.get("message")
     if not message or message.get("is_echo"):
         return

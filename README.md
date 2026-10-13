@@ -1,11 +1,10 @@
 # Messenger Bot — Người Bạn Tâm Sự Tri Kỷ 🌸
 
-Chatbot Facebook Messenger đóng vai **"người bạn thân tri kỷ"**: trò chuyện ấm áp, lắng nghe không phán xét, nhớ lâu dài qua hệ thống trí nhớ 3 tầng (semantic memory + pgvector), phản chiếu (mirror) phong cách nói chuyện riêng của từng người dùng, và tích hợp cơ chế bảo vệ an toàn tâm lý.
+Chatbot Facebook Messenger cá nhân đóng vai **"người bạn thân tri kỷ"**: trò chuyện ấm áp, lắng nghe không phán xét, nhớ lâu dài qua hệ thống trí nhớ 3 tầng, phản chiếu phong cách nói chuyện và bảo vệ an toàn tâm lý.
 
 Toàn bộ công nghệ sử dụng nền tảng **100% MIỄN PHÍ & Open-Source**:
 - **LLM**: Groq Cloud API (Free tier: `llama-3.3-70b-versatile` cho hội thoại chính, `llama-3.1-8b-instant` cho tác vụ nền).
-- **Embeddings**: `intfloat/multilingual-e5-small` (384 chiều, chạy CPU qua `sentence-transformers`).
-- **Database**: PostgreSQL 16 + extension `pgvector` (vector search).
+- **Database**: PostgreSQL 16 (Supabase). `pgvector` chỉ được giữ để migrations cũ và dữ liệu vector lịch sử vẫn tương thích; runtime không tìm kiếm vector.
 - **Framework**: FastAPI (Async Python 3.11) + SQLAlchemy 2.0 + Alembic.
 
 ---
@@ -27,7 +26,7 @@ User gửi tin ──► Meta Webhook ──► GET /webhook: verify challenge (
                                 │ 1. Kiểm tra lệnh (/help, /nho) │
                                 │ 2. Thống kê Style & EMA mirror │
                                 │ 3. Kiểm tra An toàn & Khủng hoảng│
-                                │ 4. Truy hồi Ký ức (pgvector)   │
+                                │ 4. Truy hồi từ khóa PostgreSQL │
                                 │ 5. Cắt Window theo Token Budget │
                                 │ 6. Dựng Prompt (Persona + Ngữ cảnh)│
                                 │ 7. Gọi Groq (Budget & Fallback)│
@@ -44,13 +43,12 @@ User gửi tin ──► Meta Webhook ──► GET /webhook: verify challenge (
 ### Hệ thống Trí nhớ 3 tầng (3-Tier Memory)
 1. **Trí nhớ ngắn hạn (Short-term Window)**: Cắt các lượt hội thoại gần nhất nguyên văn dựa trên ngân sách token (~850 token) thay vì số lượng tin cố định. Luôn kết thúc ở tin mới nhất. DB session được giải phóng hoàn toàn trong thời gian gọi LLM.
 2. **Tóm tắt cuốn chiếu (Rolling Summary)**: Khi số tin nhắn chưa tóm tắt vượt quá 30, kích hoạt tác vụ nền gọi model `fast` để cô đọng hội thoại thành đoạn tóm tắt dòng chảy (< 300 token) lưu vào bảng `summaries`. Tất cả lời gọi model `fast` đều ghi nhận token usage nguyên tử vào quota ngày.
-3. **Ký ức dài hạn (Semantic Long-term Memories)**:
+3. **Ký ức dài hạn**:
    - Chạy nền mỗi 6 tin của user hoặc sau 5 phút không hoạt động (được quản lý bằng asyncio timer task riêng theo từng user, tự động reset mỗi khi user gửi tin mới).
    - Dùng model `fast` ở chế độ JSON mode để trích xuất các sự kiện, sở thích, mục tiêu, cảm xúc sâu sắc về user thành các thao tác `add`, `update`, `delete`.
-   - Lưu trữ vector 384 chiều (`intfloat/multilingual-e5-small`) vào PostgreSQL `pgvector`.
-   - **Xếp hạng tái điều hướng (Composite Reranking)**:
-     $$\text{Score} = A \times \text{Cosine} + B \times \exp\left(-\frac{\Delta\text{days}}{\tau}\right) + C \times \frac{\text{Importance}}{10}$$
-     (Mặc định: $A=1.0, B=0.3, C=0.3, \tau=14$ ngày). Chọn top 6 ký ức phù hợp nhất và cập nhật `last_accessed_at`.
+   - Truy hồi có giới hạn theo user bằng từ khóa đã chuẩn hóa chữ thường, khoảng trắng, dấu câu và bỏ dấu tiếng Việt (`cà phê` khớp `ca phe`). PostgreSQL lọc ứng viên trước khi trả dữ liệu.
+   - Điểm xếp hạng: `0.55 × độ phủ từ khóa + 0.25 × exp(-số_ngày/14) + 0.20 × importance/10`. Tối đa 6 mục, 3.000 ký tự; lời chào không có từ khóa chỉ lấy tối đa 3 mục gần đây/quan trọng.
+   - Hạn chế: đây là khớp từ khóa, không hiểu đồng nghĩa/ngữ nghĩa như embedding.
 
 ---
 
@@ -74,14 +72,13 @@ app/
 │   ├── window.py            # Ước lượng token & cắt sliding window
 │   ├── summarizer.py        # Tóm tắt cuốn chiếu nền
 │   ├── extractor.py         # Trích xuất sự kiện JSON nền
-│   └── retriever.py         # Truy hồi vector & công thức re-rank đa yếu tố
+│   └── retriever.py         # Truy hồi từ khóa, độ mới và độ quan trọng
 ├── db/                      # Cơ sở dữ liệu & Data Access Layer
 │   ├── models.py            # SQLAlchemy models (User, Message, Memory, Summary, LLMUsage)
 │   └── store.py             # Repository pattern (flush trong hàm, commit ở điều phối)
 ├── integrations/            # Tích hợp dịch vụ bên ngoài
 │   ├── messenger/           # client (Meta Graph API), dedupe (LRU cache), security (HMAC)
-│   ├── llm/                 # base (LLMProvider), groq_provider, budget (đếm token atomic)
-│   └── embedder.py          # sentence-transformers multilingual-e5-small CPU
+│   └── llm/                 # base (LLMProvider), groq_provider, budget (đếm token atomic)
 ├── core/                    # Hạ tầng ứng dụng
 │   ├── settings.py          # Pydantic-settings, fail-fast startup
 │   ├── db.py                # Async engine & sessionmaker (lru_cache)
@@ -109,10 +106,10 @@ Tạo file `.env` từ `.env.example`:
 | `GROQ_MODEL_FAST` | Model phụ chạy nền (tóm tắt & trích xuất) | `llama-3.1-8b-instant` |
 | `DAILY_TOKEN_BUDGET_MAIN`| Ngân sách token ngày cho model chính | `100000` |
 | `DAILY_TOKEN_BUDGET_FAST`| Ngân sách token ngày cho model phụ | `500000` |
-| `DATABASE_URL` | Kết nối PostgreSQL hỗ trợ pgvector | `postgresql+psycopg://postgres:postgres@db:5432/messenger_bot` |
-| `EMBEDDING_MODEL` | Tên model sentence-transformers | `intfloat/multilingual-e5-small` |
+| `DATABASE_URL` | Kết nối PostgreSQL/Supabase | `postgresql+psycopg://postgres:postgres@db:5432/messenger_bot` |
 | `LOG_LEVEL` | Cấp độ ghi nhật ký hệ thống | `INFO` |
-| `TZ` | Múi giờ ứng dụng | `Asia/Ho_Chi_Minh` |
+
+Múi giờ hiển thị và ranh giới quota được cố định là `Asia/Ho_Chi_Minh`; timestamp trong DB vẫn là UTC có timezone.
 
 ---
 
@@ -203,7 +200,7 @@ Kiểm thử bao gồm:
 - Xóa sạch dữ liệu người dùng với lệnh `/quen` (`test_commands.py`)
 - Phát hiện khủng hoảng và tắt mirror phong cách (`test_safety.py`)
 - Không giữ DB session trong lúc gọi LLM (`test_session_lifecycle.py`)
-- Ghi nguyên tử message user + assistant + profile trong 1 transaction (`test_atomic_turn_transaction.py`)
+- Giữ tin đến và token usage khi gửi thất bại; chỉ ghi reply assistant sau khi gửi thành công
 - Giữ reference cho task nền và log lỗi ngoại lệ unhandled (`test_background_tasks.py`)
 - Phân rã vòng đời lượt hội thoại rõ ràng qua `TurnContext` (`test_turn_lifecycle.py`)
 - Khởi tạo trong `lifespan` và inject dependency qua FastAPI `Depends` (`test_dependency_injection.py`)
@@ -215,12 +212,11 @@ Kiểm thử bao gồm:
 1. **Kiến trúc Single Worker (1 Worker)**: Hệ thống được thiết kế chạy với 1 worker process (`--workers 1`). Giả định này giúp quản lý debouncing in-memory, các timer không hoạt động (`_inactivity_timers`), và `asyncio.Lock` tuần tự hóa theo từng người dùng một cách đơn giản, chính xác tuyệt đối mà không cần bổ sung Redis cluster. Nếu muốn mở rộng multi-worker hoặc scale ngang trong tương lai, cần bổ sung một tầng điều phối dùng chung (như Redis Streams hoặc Pub/Sub) cho debounce và distributed lock.
 2. **Cửa sổ tin nhắn 24 giờ của Meta (24-Hour Messaging Window)**: Theo chính sách tiêu chuẩn của Facebook Messenger, bot chỉ có thể phản hồi tin nhắn trong vòng 24 giờ kể từ tin nhắn gần nhất của người dùng.
 3. **Chế độ phát triển của Meta App (Development Mode)**: Khi ứng dụng Meta đang ở chế độ Development (chưa duyệt Public Live), chỉ các tài khoản Facebook có vai trò trong ứng dụng (Admin, Developer, hoặc Tester) mới có thể nhắn tin và nhận phản hồi từ chatbot.
-4. **Bộ nhớ RAM cho Embedder**: Model `sentence-transformers` được nạp trực tiếp vào RAM trên CPU (chiếm ~150-200MB RAM). Khuyến nghị máy chủ có tối thiểu 1GB RAM để hoạt động ổn định.
+4. **Truy hồi từ khóa**: không nhận biết từ đồng nghĩa; cần diễn đạt có ít nhất một từ khóa chung để tìm ký ức liên quan.
 
 ---
 
 ## 9. Các giả định kỹ thuật (Assumptions)
 
 - **Lựa chọn model Groq**: Lựa chọn mặc định là `llama-3.3-70b-versatile` (cho trả lời chính) và `llama-3.1-8b-instant` (cho tóm tắt và trích xuất). Hai model này đều có sẵn và miễn phí trên Groq. Các model có thể tùy chỉnh dễ dàng qua `GROQ_MODEL_MAIN` và `GROQ_MODEL_FAST`.
-- **Thư viện sinh Embedding**: Model `intfloat/multilingual-e5-small` (384 chiều) được tải qua `sentence-transformers` trên CPU (lazy load một lần và xử lý qua `asyncio.to_thread`). Chúng tôi không dùng `fastembed` vì tại thời điểm triển khai `fastembed` chỉ hỗ trợ phiên bản large (1024 chiều) của e5.
-- **Reranking Ký ức**: Không sử dụng ngưỡng cosine cứng vì khoảng cách của e5 thường tập trung ở mức cao; thay vào đó sử dụng công thức kết hợp Cosine + Độ tươi mới thời gian + Mức độ quan trọng để sắp xếp thứ tự ưu tiên.
+- **Tương thích dữ liệu cũ**: cột vector và extension không bị xóa. Migration mới chỉ cho phép vector `NULL`; có thể dọn dữ liệu/extension sau bằng một migration riêng khi đã xác nhận không cần rollback.
