@@ -25,7 +25,10 @@ if config.config_file_name is not None:
 
 # Set database URL dynamically from app settings
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.sync_database_url)
+config.set_main_option(
+    "sqlalchemy.url",
+    settings.sync_database_url.replace("%", "%%"),
+)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
