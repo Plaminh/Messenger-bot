@@ -34,7 +34,11 @@ def _error_category(exc: Exception) -> str:
     if isinstance(exc, APIStatusError):
         status = getattr(exc, "status_code", None)
         return f"http_{status // 100}xx" if isinstance(status, int) else "api_status"
-    if isinstance(exc, (IndexError, AttributeError, TypeError, ValueError)):
+    if isinstance(exc, TypeError):
+        # A raw TypeError occurs while invoking the SDK, before response parsing.
+        # Parser type errors are wrapped explicitly as ProviderCallError above.
+        return "sdk_configuration"
+    if isinstance(exc, (IndexError, AttributeError, ValueError)):
         return "invalid_response"
     return "unexpected"
 

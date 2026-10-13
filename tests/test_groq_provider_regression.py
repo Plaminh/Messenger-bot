@@ -1,15 +1,19 @@
 """Groq response parsing, GPT-OSS budgets, and billed-attempt accounting."""
 
 import logging
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
+import groq
 import pytest
 from sqlalchemy import select
+from groq import AsyncGroq
 
 from app.db.models import LLMUsage
 from app.integrations.llm.budget import record_llm_result_usage
-from app.integrations.llm.groq_provider import FRIENDLY_FALLBACK_TEXT, GroqProvider
+from app.integrations.llm.groq_provider import FRIENDLY_FALLBACK_TEXT, GroqProvider, _error_category
 
 
 def _response(content, *, finish="stop", total=20, completion=8, reasoning=3, choices=True):
@@ -176,3 +180,56 @@ def test_length_retry_budget_must_exceed_initial_budget():
             max_completion_tokens=2048,
             length_retry_max_completion_tokens=2048,
         )
+
+
+@pytest.mark.asyncio
+async def test_real_sdk_serializes_gpt_oss_parameters_with_mock_transport():
+    assert groq.__version__ == "1.7.0"
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "id": "mock-completion",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "openai/gpt-oss-120b",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 4,
+                    "completion_tokens": 2,
+                    "total_tokens": 6,
+                    "completion_tokens_details": {"reasoning_tokens": 1},
+                },
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        sdk_client = AsyncGroq(api_key="test-key", http_client=http_client)
+        provider = GroqProvider(
+            client=sdk_client,
+            api_key="test-key",
+            main_model="openai/gpt-oss-120b",
+            fast_model="openai/gpt-oss-20b",
+            max_completion_tokens=2048,
+            length_retry_max_completion_tokens=4096,
+        )
+        result = await provider.generate([{"role": "user", "content": "test"}])
+
+    assert result.content == "ok"
+    assert captured["reasoning_effort"] == "low"
+    assert captured["max_completion_tokens"] == 2048
+    assert "max_tokens" not in captured
+
+
+def test_sdk_argument_type_error_has_distinct_category():
+    assert _error_category(TypeError("unexpected keyword argument")) == "sdk_configuration"
