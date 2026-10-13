@@ -72,7 +72,7 @@ app/
 │   ├── window.py            # Ước lượng token & cắt sliding window
 │   ├── summarizer.py        # Tóm tắt cuốn chiếu nền
 │   ├── extractor.py         # Trích xuất sự kiện JSON nền
-│   └── retriever.py         # Truy hồi từ khóa, độ mới và độ quan trọng
+│   └── retriever.py         # Truy hồi từ khóa, độ mới theo lần tạo/cập nhật và độ quan trọng
 ├── db/                      # Cơ sở dữ liệu & Data Access Layer
 │   ├── models.py            # SQLAlchemy models (User, Message, Memory, Summary, LLMUsage)
 │   └── store.py             # Repository pattern (flush trong hàm, commit ở điều phối)
@@ -187,6 +187,8 @@ pytest -q
 Suite giữ các ranh giới quan trọng: chữ ký webhook, echo/dedup, gửi thất bại hoặc chỉ gửi được một phần, cách ly truy hồi theo user, giới hạn ký ức, `/quen`, và startup không cần Torch/embedding.
 
 Tin nhắn khủng hoảng hoặc chứa từ tục cùng phản hồi ngay sau đó không được đưa vào ký ức dài hạn. Khi tạo tóm tắt cuốn chiếu, mỗi đoạn như vậy được thay bằng một placeholder trung tính; cửa sổ hội thoại trực tiếp vẫn được giữ nguyên để bot có đủ ngữ cảnh phản hồi an toàn.
+
+Điểm “độ mới” của ký ức dựa trên lần ký ức được tạo hoặc cập nhật gần nhất. Việc chỉ truy hồi một ký ức không làm mới timestamp và không đẩy ký ức đó lên trong các lần tìm sau.
 
 ---
 

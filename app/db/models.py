@@ -90,6 +90,7 @@ class Memory(Base):
     # Historical column retained for compatibility; runtime no longer writes or searches it.
     embedding = Column(Vector(384), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Lần tạo/cập nhật gần nhất của ký ức; không thay đổi khi ký ức được truy hồi.
     last_accessed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     source_message_ids = Column(ARRAY_INT_TYPE, nullable=True, default=list)
 

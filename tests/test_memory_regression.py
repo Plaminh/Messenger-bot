@@ -32,3 +32,41 @@ async def test_accent_normalization_ranking_isolation_and_limits(db_session):
     assert all(memory.user_id == owner.id for memory in found)
     assert sum(len(memory.content) for memory in found) <= MAX_MEMORY_CHARS
 
+
+@pytest.mark.asyncio
+async def test_retrieval_is_read_only_and_order_is_stable(db_session):
+    user = User(fb_psid="read-only", style_profile={}, core_profile={})
+    db_session.add(user)
+    await db_session.flush()
+    timestamp = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    memories = [
+        Memory(
+            user_id=user.id,
+            content="thích cà phê sáng",
+            category="preference",
+            importance=8,
+            created_at=timestamp,
+            last_accessed_at=timestamp,
+        ),
+        Memory(
+            user_id=user.id,
+            content="thích cà phê tối",
+            category="preference",
+            importance=6,
+            created_at=timestamp,
+            last_accessed_at=timestamp,
+        ),
+    ]
+    db_session.add_all(memories)
+    await db_session.commit()
+
+    first = await retrieve_relevant_memories(db_session, user.id, "cà phê", top_k=10)
+    second = await retrieve_relevant_memories(db_session, user.id, "cà phê", top_k=10)
+
+    assert [item.id for item in first] == [item.id for item in second]
+    for memory in memories:
+        await db_session.refresh(memory)
+        stored = memory.last_accessed_at
+        if stored.tzinfo is None:
+            stored = stored.replace(tzinfo=timezone.utc)
+        assert stored == timestamp

@@ -11,7 +11,7 @@ import math
 import re
 import unicodedata
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Memory
@@ -100,11 +100,4 @@ async def retrieve_relevant_memories(
         selected.append(memory)
         total_chars += len(memory.content)
 
-    if selected:
-        await session.execute(
-            update(Memory)
-            .where(Memory.user_id == user_id, Memory.id.in_([memory.id for memory in selected]))
-            .values(last_accessed_at=func.now())
-        )
-        await session.flush()
     return selected
