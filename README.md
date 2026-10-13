@@ -3,7 +3,7 @@
 Chatbot Facebook Messenger cá nhân đóng vai **"người bạn thân tri kỷ"**: trò chuyện ấm áp, lắng nghe không phán xét, nhớ lâu dài qua hệ thống trí nhớ 3 tầng, phản chiếu phong cách nói chuyện và bảo vệ an toàn tâm lý.
 
 Toàn bộ công nghệ sử dụng nền tảng **100% MIỄN PHÍ & Open-Source**:
-- **LLM**: Groq Cloud API (Free tier: `llama-3.3-70b-versatile` cho hội thoại chính, `llama-3.1-8b-instant` cho tác vụ nền).
+- **LLM**: Groq Cloud API (`openai/gpt-oss-120b` cho hội thoại chính, `openai/gpt-oss-20b` cho tác vụ nền).
 - **Database**: PostgreSQL 16 (Supabase). `pgvector` chỉ được giữ để migrations cũ và dữ liệu vector lịch sử vẫn tương thích; runtime không tìm kiếm vector.
 - **Framework**: FastAPI (Async Python 3.11) + SQLAlchemy 2.0 + Alembic.
 
@@ -102,8 +102,10 @@ Tạo file `.env` từ `.env.example`:
 | `META_APP_SECRET` | App Secret từ trang Cài đặt ứng dụng Meta | `abc123...` |
 | `META_API_VERSION` | Phiên bản Graph API của Meta | `v21.0` |
 | `GROQ_API_KEY` | Khóa API miễn phí từ console.groq.com | `gsk_...` |
-| `GROQ_MODEL_MAIN` | Model chính để trò chuyện với user | `llama-3.3-70b-versatile` |
-| `GROQ_MODEL_FAST` | Model phụ chạy nền (tóm tắt & trích xuất) | `llama-3.1-8b-instant` |
+| `GROQ_MODEL_MAIN` | Model chính để trò chuyện với user | `openai/gpt-oss-120b` |
+| `GROQ_MODEL_FAST` | Model phụ chạy nền (tóm tắt & trích xuất) | `openai/gpt-oss-20b` |
+| `GROQ_MAX_COMPLETION_TOKENS` | Ngân sách completion ban đầu cho GPT-OSS | `2048` |
+| `GROQ_LENGTH_RETRY_MAX_COMPLETION_TOKENS` | Ngân sách giới hạn khi GPT-OSS hết độ dài trước khi có nội dung | `4096` |
 | `DAILY_TOKEN_BUDGET_MAIN`| Ngân sách token ngày cho model chính | `100000` |
 | `DAILY_TOKEN_BUDGET_FAST`| Ngân sách token ngày cho model phụ | `500000` |
 | `DATABASE_URL` | Kết nối PostgreSQL/Supabase | `postgresql+psycopg://postgres:postgres@db:5432/messenger_bot` |
@@ -203,5 +205,5 @@ Tin nhắn khủng hoảng hoặc chứa từ tục cùng phản hồi ngay sau 
 
 ## 9. Các giả định kỹ thuật (Assumptions)
 
-- **Lựa chọn model Groq**: Lựa chọn mặc định là `llama-3.3-70b-versatile` (cho trả lời chính) và `llama-3.1-8b-instant` (cho tóm tắt và trích xuất). Hai model này đều có sẵn và miễn phí trên Groq. Các model có thể tùy chỉnh dễ dàng qua `GROQ_MODEL_MAIN` và `GROQ_MODEL_FAST`.
+- **Lựa chọn model Groq**: Lựa chọn mặc định là `openai/gpt-oss-120b` (cho trả lời chính) và `openai/gpt-oss-20b` (cho tóm tắt và trích xuất). Các model có thể tùy chỉnh qua `GROQ_MODEL_MAIN` và `GROQ_MODEL_FAST`.
 - **Tương thích dữ liệu cũ**: cột vector và extension không bị xóa. Migration mới chỉ cho phép vector `NULL`; có thể dọn dữ liệu/extension sau bằng một migration riêng khi đã xác nhận không cần rollback.

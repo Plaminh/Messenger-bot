@@ -1,7 +1,16 @@
 """Base protocol and data contracts for LLM providers."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
+
+
+@dataclass(frozen=True)
+class LLMBilledAttempt:
+    """Billable provider attempt, without prompt or response content."""
+
+    model: str
+    tokens: int
+    requests: int = 1
 
 
 @dataclass
@@ -11,6 +20,7 @@ class LLMResult:
     usage_tokens: int
     model: str
     tier: str
+    billed_attempts: list[LLMBilledAttempt] = field(default_factory=list)
 
 
 @runtime_checkable

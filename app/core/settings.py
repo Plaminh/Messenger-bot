@@ -4,7 +4,7 @@ Enforces fail-fast validation on startup when required environment variables are
 """
 
 from functools import lru_cache
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,8 +25,10 @@ class Settings(BaseSettings):
 
     # Groq LLM settings
     GROQ_API_KEY: str = Field(..., description="Groq API Key")
-    GROQ_MODEL_MAIN: str = Field(default="llama-3.3-70b-versatile", description="Main conversational model")
-    GROQ_MODEL_FAST: str = Field(default="llama-3.1-8b-instant", description="Fast model for summary and extraction")
+    GROQ_MODEL_MAIN: str = Field(default="openai/gpt-oss-120b", description="Main conversational model")
+    GROQ_MODEL_FAST: str = Field(default="openai/gpt-oss-20b", description="Fast model for summary and extraction")
+    GROQ_MAX_COMPLETION_TOKENS: int = Field(default=2048, ge=256, le=8192)
+    GROQ_LENGTH_RETRY_MAX_COMPLETION_TOKENS: int = Field(default=4096, ge=512, le=16384)
     DAILY_TOKEN_BUDGET_MAIN: int = Field(default=100_000, description="Daily token quota for main model")
     DAILY_TOKEN_BUDGET_FAST: int = Field(default=500_000, description="Daily token quota for fast model")
 
@@ -35,6 +37,15 @@ class Settings(BaseSettings):
 
     # Logging; local time is fixed to Asia/Ho_Chi_Minh in prompt and budget code.
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")
+
+    @model_validator(mode="after")
+    def validate_groq_completion_budgets(self) -> "Settings":
+        if self.GROQ_LENGTH_RETRY_MAX_COMPLETION_TOKENS <= self.GROQ_MAX_COMPLETION_TOKENS:
+            raise ValueError(
+                "GROQ_LENGTH_RETRY_MAX_COMPLETION_TOKENS must be greater than "
+                "GROQ_MAX_COMPLETION_TOKENS"
+            )
+        return self
 
     @property
     def async_database_url(self) -> str:

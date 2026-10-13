@@ -18,7 +18,7 @@ from app.db.store import (
     update_memory,
 )
 from app.integrations.llm.base import LLMProvider
-from app.integrations.llm.budget import record_llm_usage
+from app.integrations.llm.budget import record_llm_result_usage
 from app.memory.retriever import retrieve_relevant_memories
 from app.persona.safety import sanitize_turns
 
@@ -110,8 +110,7 @@ async def extract_and_sync_memories(
             max_tokens=500,
             temperature=0.2,
         )
-        if res.usage_tokens > 0:
-            await record_llm_usage(session, res.model, res.usage_tokens)
+        await record_llm_result_usage(session, res)
 
         if res.tier == "fallback":
             # LLM unavailable: keep the watermark so these messages are retried later

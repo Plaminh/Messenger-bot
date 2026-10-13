@@ -36,7 +36,7 @@ from app.db.store import (
     update_user_profiles,
 )
 from app.integrations.llm.base import LLMProvider, LLMResult
-from app.integrations.llm.budget import record_llm_usage, should_downgrade_to_fast
+from app.integrations.llm.budget import record_llm_result_usage, should_downgrade_to_fast
 from app.integrations.llm.groq_provider import GroqProvider
 from app.integrations.messenger.client import MessengerClient
 from app.memory.extractor import (
@@ -337,8 +337,7 @@ class ChatOrchestrator:
         async with self._session_factory() as write_session:
             try:
                 # Record token consumption
-                if reply.usage_tokens > 0:
-                    await record_llm_usage(write_session, reply.model, reply.usage_tokens)
+                await record_llm_result_usage(write_session, reply)
 
                 # Preserve incoming text and billed usage even if delivery later fails.
                 for item_text, item_mid in ctx.source_messages or [(ctx.clean_text, ctx.mid)]:

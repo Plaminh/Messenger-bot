@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.db.store import get_summary, get_unsummarized_messages, upsert_summary
 from app.integrations.llm.base import LLMProvider
-from app.integrations.llm.budget import record_llm_usage
+from app.integrations.llm.budget import record_llm_result_usage
 from app.memory.window import (
     RECENT_WINDOW_MESSAGE_LIMIT,
     RECENT_WINDOW_TOKEN_BUDGET,
@@ -97,8 +97,7 @@ async def maybe_run_rolling_summary(
             max_tokens=MAX_SUMMARY_TOKENS,
             temperature=0.3,
         )
-        if res.usage_tokens > 0:
-            await record_llm_usage(session, res.model, res.usage_tokens)
+        await record_llm_result_usage(session, res)
         updated_content = res.content.strip()
 
         # Never overwrite the stored summary with the friendly error text / empty output
@@ -122,8 +121,7 @@ async def maybe_run_rolling_summary(
                 max_tokens=MAX_SUMMARY_TOKENS,
                 temperature=0.3,
             )
-            if condensed_res.usage_tokens > 0:
-                await record_llm_usage(session, condensed_res.model, condensed_res.usage_tokens)
+            await record_llm_result_usage(session, condensed_res)
             condensed_content = condensed_res.content.strip()
             if condensed_res.tier == "fallback" or not condensed_content:
                 await session.commit()

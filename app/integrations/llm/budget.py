@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.settings import get_settings
 from app.db.models import LLMUsage
+from app.integrations.llm.base import LLMResult
 
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
@@ -52,6 +53,21 @@ async def record_llm_usage(
             await session.execute(update_stmt)
 
     await session.flush()
+
+
+async def record_llm_result_usage(session: AsyncSession, result: LLMResult) -> None:
+    """Record every billed provider attempt, including retries and empty completions."""
+    if result.billed_attempts:
+        for attempt in result.billed_attempts:
+            await record_llm_usage(
+                session,
+                attempt.model,
+                attempt.tokens,
+                requests=attempt.requests,
+            )
+    elif result.usage_tokens > 0:
+        # Backward compatibility for injected/test providers using the old contract.
+        await record_llm_usage(session, result.model, result.usage_tokens)
 
 
 async def get_daily_tokens(session: AsyncSession, model: str) -> int:
