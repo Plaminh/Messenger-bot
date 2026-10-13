@@ -19,6 +19,7 @@ from app.memory.window import (
     build_recent_window,
     estimate_tokens,
 )
+from app.persona.safety import sanitize_turns
 
 logger = get_logger(__name__)
 
@@ -58,9 +59,13 @@ async def maybe_run_rolling_summary(
 
     # Format transcript
     lines = []
-    for msg in chunk:
-        speaker = "Bạn (bot)" if msg.role == "assistant" else "User"
-        lines.append(f"{speaker}: {msg.content}")
+    sanitized_messages = sanitize_turns(
+        chunk,
+        placeholder="[một đoạn trao đổi nhạy cảm đã được lược bỏ]",
+    )
+    for role, content in sanitized_messages:
+        speaker = "Bạn (bot)" if role == "assistant" else "User"
+        lines.append(f"{speaker}: {content}")
     transcript = "\n".join(lines)
 
     previous_summary = summary.content if summary else "Chưa có tóm tắt trước đó."

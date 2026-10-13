@@ -20,6 +20,7 @@ from app.db.store import (
 from app.integrations.llm.base import LLMProvider
 from app.integrations.llm.budget import record_llm_usage
 from app.memory.retriever import retrieve_relevant_memories
+from app.persona.safety import sanitize_turns
 
 logger = get_logger(__name__)
 
@@ -55,11 +56,17 @@ async def extract_and_sync_memories(
     if len(recent_msgs) < 2:
         return
 
+    sanitized_messages = sanitize_turns(recent_msgs)
+    if len(sanitized_messages) < 2:
+        await set_last_extracted_message_id(session, user_id, recent_msgs[-1].id)
+        await session.commit()
+        return
+
     # Form conversational snippet
     snippet_lines = []
-    for msg in recent_msgs:
-        speaker = "Bạn (bot)" if msg.role == "assistant" else "User"
-        snippet_lines.append(f"{speaker}: {msg.content}")
+    for role, content in sanitized_messages:
+        speaker = "Bạn (bot)" if role == "assistant" else "User"
+        snippet_lines.append(f"{speaker}: {content}")
     dialogue_snippet = "\n".join(snippet_lines)
 
     existing_memories = await retrieve_relevant_memories(
@@ -82,7 +89,8 @@ async def extract_and_sync_memories(
         "   - 'delete': xóa thông tin nếu user đã sửa đổi hoặc thông tin không còn đúng (id: số ID hiện tại).\n"
         "4. Category hợp lệ: 'person', 'event', 'preference', 'feeling', 'goal', 'other'.\n"
         "5. Importance: số nguyên từ 1 đến 10.\n"
-        "6. Định dạng JSON bắt buộc: {\"operations\": [{\"op\": \"add|update|delete\", \"id\": null|int, \"fact\": \"...\", \"category\": \"...\", \"importance\": 1-10}]}"
+        "6. Tuyệt đối không lưu nội dung tự hại, tự sát, chửi thề hay xúc phạm.\n"
+        "7. Định dạng JSON bắt buộc: {\"operations\": [{\"op\": \"add|update|delete\", \"id\": null|int, \"fact\": \"...\", \"category\": \"...\", \"importance\": 1-10}]}"
     )
 
     user_prompt = (

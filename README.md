@@ -186,6 +186,8 @@ pytest -q
 
 Suite giữ các ranh giới quan trọng: chữ ký webhook, echo/dedup, gửi thất bại hoặc chỉ gửi được một phần, cách ly truy hồi theo user, giới hạn ký ức, `/quen`, và startup không cần Torch/embedding.
 
+Tin nhắn khủng hoảng hoặc chứa từ tục cùng phản hồi ngay sau đó không được đưa vào ký ức dài hạn. Khi tạo tóm tắt cuốn chiếu, mỗi đoạn như vậy được thay bằng một placeholder trung tính; cửa sổ hội thoại trực tiếp vẫn được giữ nguyên để bot có đủ ngữ cảnh phản hồi an toàn.
+
 ---
 
 ## 8. Giới hạn đã biết (Known Limitations)

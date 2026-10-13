@@ -6,6 +6,9 @@ Also ensures toxic profanity or hate speech is never mirrored.
 """
 
 import re
+from typing import Optional
+
+from app.db.models import Message
 
 # Comprehensive crisis indicators (suicide, self-harm, deep despair)
 CRISIS_PATTERNS = [
@@ -42,6 +45,28 @@ def contains_toxic_language(text: str) -> bool:
 def is_sensitive_text(text: str) -> bool:
     """Return whether text must be excluded from learned style and memory."""
     return is_crisis(text) or contains_toxic_language(text)
+
+
+def sanitize_turns(
+    messages: list[Message],
+    placeholder: Optional[str] = None,
+) -> list[tuple[str, str]]:
+    """Remove sensitive user turns and the immediately following assistant reply."""
+    sanitized: list[tuple[str, str]] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        if message.role == "user" and is_sensitive_text(message.content):
+            if placeholder is not None:
+                sanitized.append(("user", placeholder))
+            index += 1
+            if index < len(messages) and messages[index].role == "assistant":
+                index += 1
+            continue
+        role = "assistant" if message.role == "assistant" else "user"
+        sanitized.append((role, message.content))
+        index += 1
+    return sanitized
 
 
 def get_crisis_prompt_guidance() -> str:
