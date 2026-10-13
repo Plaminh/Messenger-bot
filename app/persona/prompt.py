@@ -61,6 +61,7 @@ def get_current_time_str(at: Optional[datetime] = None) -> str:
 
 def assemble_system_prompt(
     *,
+    display_name: Optional[str],
     core_profile: dict[str, Any],
     style_profile: dict[str, Any],
     relevant_memories: list[Memory],
@@ -86,15 +87,12 @@ def assemble_system_prompt(
     pronouns = core_profile.get("pronouns", {})
     bot_p = pronouns.get("bot", "mình")
     user_p = pronouns.get("user", "bạn")
-    name = core_profile.get("name") or "bạn"
-
-    profile_lines = [
-        f"- Tên gọi của người dùng: {name}",
-        f"- Cách xưng hô quen thuộc: bạn xưng là '{bot_p}', gọi người dùng là '{user_p}'.",
-    ]
-    extra_facts = core_profile.get("facts", [])
-    if extra_facts:
-        profile_lines.append(f"- Điểm cốt lõi về bạn ấy: {', '.join(extra_facts[:3])}")
+    profile_lines = []
+    if display_name:
+        profile_lines.append(f"- Tên gọi của người dùng: {display_name}")
+    profile_lines.append(
+        f"- Cách xưng hô quen thuộc: bạn xưng là '{bot_p}', gọi người dùng là '{user_p}'."
+    )
     sections.append("HỒ SƠ CỐT LÕI CỦA NGƯỜI BẠN NÀY:\n" + "\n".join(profile_lines))
 
     # Relevant retrieved long-term memories

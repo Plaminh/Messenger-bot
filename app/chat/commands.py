@@ -45,7 +45,7 @@ async def handle_command(
 
         lines = ["Đây là những gì mình đang nhớ về bạn nè:"]
 
-        name = core.get("name") or user.display_name
+        name = user.display_name
         if name:
             lines.append(f"• Tên bạn: {name}")
         if pronouns:

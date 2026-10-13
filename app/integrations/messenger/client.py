@@ -42,6 +42,41 @@ class MessengerClient:
         """Close underlying HTTP client."""
         await self._client.aclose()
 
+    @staticmethod
+    def _sanitize_first_name(value: Any) -> Optional[str]:
+        """Validate a profile name before it can enter an LLM prompt."""
+        if not isinstance(value, str):
+            return None
+        name = value.strip()
+        if not name or len(name) > 40:
+            return None
+        if not all(char.isalpha() or char == " " or char in "-'" for char in name):
+            return None
+        return name
+
+    async def fetch_first_name(self, psid: str) -> tuple[Optional[str], bool]:
+        """Fetch a Messenger profile first name without ever failing a chat turn."""
+        api_version = getattr(self._settings, "META_API_VERSION", "v21.0")
+        url = f"https://graph.facebook.com/{api_version}/{psid}"
+        headers = {"Authorization": f"Bearer {self._settings.META_PAGE_ACCESS_TOKEN}"}
+        try:
+            response = await self._client.get(
+                url,
+                params={"fields": "first_name"},
+                headers=headers,
+                timeout=3.0,
+            )
+            if response.status_code == 429 or response.status_code >= 500:
+                return None, False
+            if 400 <= response.status_code < 500:
+                return None, True
+            if not 200 <= response.status_code < 300:
+                return None, False
+            data = response.json()
+            return self._sanitize_first_name(data.get("first_name")), True
+        except (httpx.RequestError, ValueError, TypeError, AttributeError):
+            return None, False
+
     async def send_action(self, recipient_psid: str, action: str) -> bool:
         """Send a sender action such as 'mark_seen', 'typing_on', 'typing_off'."""
         payload = {

@@ -171,8 +171,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
 
 Người dùng có thể gõ trực tiếp các lệnh sau đầu tin nhắn:
 - `/help`: Xem giới thiệu về bot và danh sách các lệnh hỗ trợ.
-- `/nho`: Xem toàn bộ những gì bot đang ghi nhớ về bạn (tên gọi, cách xưng hô, sự kiện, sở thích...) nhằm minh bạch hóa dữ liệu.
-- `/quen`: Xóa vĩnh viễn toàn bộ dữ liệu, ký ức và lịch sử tin nhắn của người dùng khỏi hệ thống theo cơ chế cascade deletion.
+- `/nho`: Xem toàn bộ những gì bot đang ghi nhớ về bạn (tên gọi lấy một lần từ hồ sơ Messenger, cách xưng hô, sự kiện, sở thích...) nhằm minh bạch hóa dữ liệu.
+- `/quen`: Xóa vĩnh viễn toàn bộ dữ liệu, gồm tên lấy từ hồ sơ Messenger, ký ức và lịch sử tin nhắn của người dùng khỏi hệ thống theo cơ chế cascade deletion.
 
 ---
 

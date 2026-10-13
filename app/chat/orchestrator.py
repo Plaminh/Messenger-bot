@@ -62,6 +62,7 @@ class TurnContext:
     psid: str
     user_id: int
     clean_text: str
+    display_name: Optional[str] = None
     mid: Optional[str] = None
     core_profile: dict[str, Any] = field(default_factory=dict)
     updated_style: dict[str, Any] = field(default_factory=dict)
@@ -191,6 +192,7 @@ class ChatOrchestrator:
                 return None
 
             user_id = user.id
+            display_name = user.display_name
             core_profile = dict(user.core_profile or {})
             raw_style = dict(user.style_profile or {})
 
@@ -220,6 +222,16 @@ class ChatOrchestrator:
             await read_session.commit()
 
         # ---------------- Phase 2: In-Memory Prep (No DB Session Held) ----------------
+        if not display_name and not core_profile.get("name_lookup_done"):
+            try:
+                fetched_name, lookup_done = await self._messenger.fetch_first_name(psid)
+            except Exception as exc:
+                logger.warning("Không thể lấy tên hồ sơ Messenger cho psid=%s: %s", psid, exc)
+                fetched_name, lookup_done = None, False
+            if lookup_done:
+                core_profile["name_lookup_done"] = True
+                display_name = fetched_name
+
         crisis_active = is_crisis(clean_text)
         toxic_active = contains_toxic_language(clean_text)
 
@@ -237,6 +249,7 @@ class ChatOrchestrator:
         is_first_interaction = user_msg_count == 0
 
         system_prompt = assemble_system_prompt(
+            display_name=display_name,
             core_profile=core_profile,
             style_profile=updated_style,
             relevant_memories=relevant_memories,
@@ -256,6 +269,7 @@ class ChatOrchestrator:
             psid=psid,
             user_id=user_id,
             clean_text=clean_text,
+            display_name=display_name,
             mid=mid,
             core_profile=core_profile,
             updated_style=updated_style,
@@ -294,6 +308,7 @@ class ChatOrchestrator:
                     ctx.user_id,
                     style_profile=ctx.updated_style,
                     core_profile=ctx.core_profile,
+                    display_name=ctx.display_name,
                     last_user_msg_at=write_time,
                 )
                 await write_session.commit()
