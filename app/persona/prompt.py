@@ -68,6 +68,7 @@ def assemble_system_prompt(
     summary_content: Optional[str],
     recent_user_messages: list[str],
     is_crisis_active: bool = False,
+    is_toxic_active: bool = False,
     is_first_interaction: bool = False,
 ) -> str:
     """Compose complete system prompt for the conversational turn."""
@@ -113,6 +114,12 @@ def assemble_system_prompt(
     else:
         style_text = render_style_guidance(style_profile, recent_user_messages)
         sections.append(f"PHONG CÁCH VÀ NHỊP ĐIỆU CẦN ĐỒNG ĐIỆU (MIRROR):\n{style_text}")
+
+    if is_toxic_active and not is_crisis_active:
+        sections.append(
+            "HƯỚNG DẪN KHI NGƯỜI DÙNG ĐANG DÙNG NGÔN TỪ THÔ TỤC:\n"
+            "- Không lặp lại hay bắt chước từ tục, không chửi lại. Giữ giọng bình tĩnh, ấm áp và nhẹ nhàng ghi nhận cảm xúc đằng sau như bực bội hoặc tức giận."
+        )
 
     # Negative constraints
     sections.append(NEGATIVE_CONSTRAINTS)

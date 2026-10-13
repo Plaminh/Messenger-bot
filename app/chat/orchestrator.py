@@ -52,7 +52,7 @@ from app.memory.window import (
     build_recent_window,
 )
 from app.persona.prompt import assemble_system_prompt, build_chat_messages
-from app.persona.safety import contains_toxic_language, is_crisis
+from app.persona.safety import contains_toxic_language, is_crisis, is_sensitive_text
 from app.persona.style import detect_pronouns, update_style_profile
 
 logger = get_logger(__name__)
@@ -259,7 +259,11 @@ class ChatOrchestrator:
         updated_style = raw_style if (crisis_active or toxic_active) else update_style_profile(raw_style, clean_text)
 
         # Step 8: Prompt assembly
-        recent_user_texts = [m.content for m in window_messages if m.role == "user"]
+        recent_user_texts = [
+            m.content
+            for m in window_messages
+            if m.role == "user" and not is_sensitive_text(m.content)
+        ]
         is_first_interaction = user_msg_count == 0
 
         system_prompt = assemble_system_prompt(
@@ -270,6 +274,7 @@ class ChatOrchestrator:
             summary_content=summary_text,
             recent_user_messages=recent_user_texts,
             is_crisis_active=crisis_active,
+            is_toxic_active=toxic_active,
             is_first_interaction=is_first_interaction,
         )
 

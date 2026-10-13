@@ -39,6 +39,11 @@ def contains_toxic_language(text: str) -> bool:
     return bool(TOXIC_REGEX.search(text))
 
 
+def is_sensitive_text(text: str) -> bool:
+    """Return whether text must be excluded from learned style and memory."""
+    return is_crisis(text) or contains_toxic_language(text)
+
+
 def get_crisis_prompt_guidance() -> str:
     """Prompt guidance when user is in crisis."""
     return (
